@@ -1,0 +1,8 @@
+*.md
+
+!AGENTS.md
+!README.md
+!docs/*.md
+
+__pycache__/
+.venv/

@@ -1,0 +1,18 @@
+name: multi_file_demo
+
+inputs:
+  source__records:
+    uri: records/*.csv
+    combine_strategy: concat
+
+steps:
+  - id: double_amount
+    uses: steps.normalize.double_amount
+    with:
+      input: source__records
+      output: records_norm
+
+outputs:
+  datasets:
+    - name: final
+      from: records_norm
