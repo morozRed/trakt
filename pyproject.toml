@@ -19,6 +19,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 trakt-run-local = "trakt.run_local:main"
+trakt-run-glue = "trakt.runtime.glue_main:main"
 
 [tool.setuptools]
 include-package-data = true

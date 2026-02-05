@@ -134,6 +134,27 @@ python -m trakt.run_local \
   --stream-chunk-size 10000
 ```
 
+### Run with Glue Contract
+
+Glue entrypoint command:
+
+```bash
+python -m trakt.runtime.glue_main \
+  --pipeline-file /path/to/pipeline.yaml \
+  --client-id acme \
+  --batch-id batch-20260205 \
+  --input-dir /path/to/input \
+  --output-dir /path/to/output \
+  --job-name trakt-glue-demo
+```
+
+Required runtime args:
+- `--client-id`
+- `--batch-id`
+- one of `--pipeline` or `--pipeline-file`
+- `--input-dir`
+- `--output-dir`
+
 ### Run from Python API
 
 If your project lives elsewhere, install this framework in editable mode:
