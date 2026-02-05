@@ -246,6 +246,43 @@ def test_loader_requires_const_wrapper_for_literal_strings(tmp_path) -> None:
         load_pipeline_from_yaml(pipeline_file, registry=registry)
 
 
+def test_loader_suggests_binding_name_on_typo(tmp_path) -> None:
+    def run(ctx, input):
+        return {"output": input}
+
+    run.declared_inputs = ["input"]
+    run.declared_outputs = ["output"]
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: binding_typo
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: normalize.typo
+                with:
+                  inpt: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    registry = StepRegistry()
+    registry.register("normalize.typo", run)
+    with pytest.raises(PipelineLoadError, match="did you mean 'input'"):
+        load_pipeline_from_yaml(pipeline_file, registry=registry)
+
+
 def test_loader_parses_per_output_dataset_config(tmp_path) -> None:
     _build_direct_module()
     pipeline_file = tmp_path / "pipeline.yaml"

@@ -21,7 +21,7 @@ from trakt.core.policies import (
 )
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
-from trakt.core.steps import ResolvedStep, Step, StepBindingError
+from trakt.core.steps import ResolvedStep, Step, StepBindingError, step_contract
 from trakt.core.workflow import (
     WorkflowArtifact,
     WorkflowBuilder,
@@ -64,6 +64,7 @@ __all__ = [
     "RunnerBase",
     "Step",
     "StepBindingError",
+    "step_contract",
     "StepRegistry",
     "WorkflowBuilder",
     "WorkflowStep",

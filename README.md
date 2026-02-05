@@ -78,13 +78,14 @@ execution:
 Step modules must export `run(ctx, **kwargs)` and can declare bindings:
 
 ```python
+from trakt import step_contract
+
+
+@step_contract(inputs=["input"], outputs=["output"])
 def run(ctx, input):
     frame = input.copy()
     frame["amount"] = frame["amount"] * 2
     return {"output": frame}
-
-run.declared_inputs = ["input"]
-run.declared_outputs = ["output"]
 ```
 
 Output bindings are used only to map returned result keys to artifact names.
@@ -117,6 +118,15 @@ DataFrame chunks (CSV only) instead of a single DataFrame. For stream mode,
 mark steps as stream-capable and return chunk iterators:
 
 ```python
+from trakt import step_contract
+
+
+@step_contract(
+    inputs=["input"],
+    outputs=["output"],
+    supports_batch=False,
+    supports_stream=True,
+)
 def run(ctx, input):
     def _iter_chunks():
         for chunk in input:
@@ -124,10 +134,6 @@ def run(ctx, input):
             frame["amount"] = frame["amount"] * 2
             yield frame
     return {"output": _iter_chunks()}
-
-run.declared_inputs = ["input"]
-run.declared_outputs = ["output"]
-run.supports_stream = True
 ```
 
 Steps can also return metrics using the reserved `__metrics__` key.
@@ -271,18 +277,15 @@ for unknown fields in input/step/output definitions.
 Or define the workflow directly in Python:
 
 ```python
-from trakt import artifact, ref, step, workflow
+from trakt import artifact, ref, step, step_contract, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
+@step_contract(inputs=["input"], outputs=["output"])
 def double_amount(ctx, input):
     frame = input.copy()
     frame["amount"] = frame["amount"] * 2
     return {"output": frame}
-
-
-double_amount.declared_inputs = ["input"]
-double_amount.declared_outputs = ["output"]
 
 source_records = artifact("source__records").as_kind("csv").at("records.csv")
 double_step = (
@@ -336,23 +339,36 @@ Built-in quality gate step:
 Multiple inputs for one step:
 
 ```python
+from trakt import step_contract
+
 input_1 = artifact("source__records").at("records.csv")
 input_2 = artifact("source__countries").at("countries.csv")
 
 
+@step_contract(inputs=["inputs"], outputs=["output"])
 def join_inputs(ctx, inputs):
     left, right = inputs
     return {"output": left.merge(right, on="id", how="left")}
-
-
-join_inputs.declared_inputs = ["inputs"]
-join_inputs.declared_outputs = ["output"]
 
 join_step = (
     step("join_inputs", run=join_inputs)
     .bind_inputs(input_1, input_2)
     .bind_output("records_joined")
 )
+```
+
+### Happy Path One-Liners
+
+Python DSL (80% case):
+
+```python
+step("normalize", run=normalize).input(input=ref("source__records")).params(currency="usd").output(output=ref("records_norm"))
+```
+
+CLI (80% case):
+
+```bash
+python -m trakt.run_local --pipeline-file pipelines/demo/pipeline.yaml --input-dir data/in --output-dir data/out --strict-keys
 ```
 
 ## Run Included Example

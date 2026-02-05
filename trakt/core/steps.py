@@ -1,8 +1,9 @@
 """Step contract used by pipeline execution."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from typing import Any
 
 from trakt.core.bindings import is_const_binding
@@ -29,6 +30,32 @@ class Step(ABC):
 
 class StepBindingError(ValueError):
     """Raised when a step definition has invalid input/output bindings."""
+
+
+def step_contract(
+    *,
+    inputs: Sequence[str] | None = None,
+    outputs: Sequence[str] | None = None,
+    supports_batch: bool | str = True,
+    supports_stream: bool | str = False,
+) -> Callable[[StepHandler], StepHandler]:
+    """Declare step metadata using a decorator instead of manual function attributes."""
+    declared_inputs = _normalize_declared_names(inputs, field_name="inputs")
+    declared_outputs = _normalize_declared_names(outputs, field_name="outputs")
+    batch_capability = _coerce_capability(supports_batch, field_name="supports_batch")
+    stream_capability = _coerce_capability(
+        supports_stream,
+        field_name="supports_stream",
+    )
+
+    def _decorate(handler: StepHandler) -> StepHandler:
+        setattr(handler, "declared_inputs", list(declared_inputs))
+        setattr(handler, "declared_outputs", list(declared_outputs))
+        setattr(handler, "supports_batch", batch_capability)
+        setattr(handler, "supports_stream", stream_capability)
+        return handler
+
+    return _decorate
 
 
 @dataclass(slots=True)
@@ -87,6 +114,14 @@ class ResolvedStep(Step):
                 + ", ".join(overlapping_names)
             )
 
+        declared_binding_names = sorted(set(self.declared_inputs + self.declared_outputs))
+        unknown_bindings: list[str] = []
+        if declared_binding_names:
+            declared_name_set = set(declared_binding_names)
+            unknown_bindings = sorted(
+                key for key in self.bindings if key not in declared_name_set
+            )
+
         missing_inputs = [
             name for name in self.declared_inputs if name not in self.bindings
         ]
@@ -94,12 +129,20 @@ class ResolvedStep(Step):
             name for name in self.declared_outputs if name not in self.bindings
         ]
 
-        if missing_inputs or missing_outputs:
+        if missing_inputs or missing_outputs or unknown_bindings:
             details: list[str] = []
             if missing_inputs:
                 details.append("missing input bindings=" + ", ".join(missing_inputs))
             if missing_outputs:
                 details.append("missing output bindings=" + ", ".join(missing_outputs))
+            if unknown_bindings:
+                details.append(
+                    "unknown bindings="
+                    + ", ".join(
+                        _format_binding_hint(name, candidates=declared_binding_names)
+                        for name in unknown_bindings
+                    )
+                )
             raise StepBindingError(
                 f"Step '{self.id}' binding error: " + "; ".join(details)
             )
@@ -229,3 +272,48 @@ def _coerce_capability(value: Any, field_name: str) -> bool:
     raise ValueError(
         f"Step capability '{field_name}' must be a bool or boolean-like string."
     )
+
+
+def _normalize_declared_names(
+    names: Sequence[str] | None,
+    *,
+    field_name: str,
+) -> list[str]:
+    if names is None:
+        return []
+    if isinstance(names, (str, bytes)) or not isinstance(names, Sequence):
+        raise TypeError(f"Step contract '{field_name}' must be a sequence of strings.")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_name in names:
+        if not isinstance(raw_name, str):
+            raise TypeError(
+                f"Step contract '{field_name}' must contain only strings."
+            )
+        name = raw_name.strip()
+        if not name:
+            raise ValueError(
+                f"Step contract '{field_name}' cannot contain empty names."
+            )
+        if name in seen:
+            raise ValueError(
+                f"Step contract '{field_name}' cannot contain duplicate name '{name}'."
+            )
+        seen.add(name)
+        normalized.append(name)
+    return normalized
+
+
+def _format_binding_hint(name: str, *, candidates: Sequence[str]) -> str:
+    suggestion = _best_binding_match(name, candidates=candidates)
+    if suggestion is None:
+        return name
+    return f"{name} (did you mean '{suggestion}'?)"
+
+
+def _best_binding_match(name: str, *, candidates: Sequence[str]) -> str | None:
+    matches = get_close_matches(name, list(candidates), n=1, cutoff=0.6)
+    if not matches:
+        return None
+    return matches[0]

@@ -88,11 +88,10 @@ A step is an executable unit that transforms data.
 
 Step modules export:
 - `run(ctx, **kwargs)` callable
-- optional `run.declared_inputs = [...]`
-- optional `run.declared_outputs = [...]`
-- optional capabilities:
-  - `run.supports_batch` (default `True`)
-  - `run.supports_stream` (default `False`)
+- optional `@step_contract(inputs=[...], outputs=[...])` metadata decorator
+- optional capability flags on the same decorator:
+  - `supports_batch` (default `True`)
+  - `supports_stream` (default `False`)
 
 Important runtime rule:
 - Output bindings are used only to map returned result keys to artifact names.
@@ -101,14 +100,15 @@ Important runtime rule:
 Example:
 
 ```python
+from trakt import step_contract
+
+
+@step_contract(inputs=["input", "multiplier", "currency"], outputs=["output"])
 def run(ctx, input, multiplier, currency):
     frame = input.copy()
     frame["amount"] = frame["amount"] * multiplier
     frame["currency"] = currency
     return {"output": frame}
-
-run.declared_inputs = ["input", "multiplier", "currency"]
-run.declared_outputs = ["output"]
 ```
 
 ### Pipeline
@@ -187,6 +187,12 @@ Python DSL recommendation:
 - use `.params(...)` for literal config values
 - use `.output(...)` for output artifact bindings
 - `.in_(...)` / `.out(...)` remain available as aliases
+
+Happy-path one-liner:
+
+```python
+step("enrich", run=enrich).input(input=ref("source__records")).params(currency="usd").output(output=ref("records_enriched"))
+```
 
 When loading YAML, you can enable strict key validation:
 
@@ -274,15 +280,22 @@ execution:
 Python step:
 
 ```python
-def run(ctx, input):
-    for chunk in input:
-        frame = chunk.copy()
-        frame["amount"] = frame["amount"] * 2
-        yield frame
+from trakt import step_contract
 
-run.declared_inputs = ["input"]
-run.declared_outputs = ["output"]
-run.supports_stream = True
+
+@step_contract(
+    inputs=["input"],
+    outputs=["output"],
+    supports_batch=False,
+    supports_stream=True,
+)
+def run(ctx, input):
+    def _iter_chunks():
+        for chunk in input:
+            frame = chunk.copy()
+            frame["amount"] = frame["amount"] * 2
+            yield frame
+    return {"output": _iter_chunks()}
 ```
 
 Tune chunk size with `--stream-chunk-size` (CSV adapters only).
@@ -401,18 +414,15 @@ outputs:
 ## 7) Python DSL Example
 
 ```python
-from trakt import artifact, ref, step, workflow
+from trakt import artifact, ref, step, step_contract, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
+@step_contract(inputs=["input", "currency"], outputs=["output"])
 def normalize(ctx, input, currency):
     frame = input.copy()
     frame["currency"] = currency
     return {"output": frame, "__metrics__": {"matched": len(frame)}}
-
-
-normalize.declared_inputs = ["input", "currency"]
-normalize.declared_outputs = ["output"]
 
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
 
@@ -453,7 +463,7 @@ result = (
 
 If you are upgrading existing pipelines:
 - remove output-name params from step handler signatures (they are no longer injected)
-- keep `declared_outputs` so result keys are still mapped correctly
+- declare outputs via `@step_contract(outputs=[...])` so result keys are mapped correctly
 - wrap literal string configs with `const` in YAML (`{ const: ... }`)
 - Python DSL can use `.params(...)` for literal configs; `const(...)` still works for legacy `.bind(...)`
 - optionally move output adapter config from runner defaults into per-output `outputs.datasets` entries
