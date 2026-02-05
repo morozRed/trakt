@@ -13,7 +13,7 @@ def test_local_runner_executes_stream_pipeline(tmp_path, monkeypatch) -> None:
     (tmp_path / "steps" / "normalize" / "double_stream.py").write_text(
         textwrap.dedent(
             """
-            def run(ctx, input, output):
+            def run(ctx, input):
                 def _iter_chunks():
                     for chunk in input:
                         frame = chunk.copy()
@@ -94,7 +94,7 @@ def test_stream_mode_rejects_non_concat_multi_file_inputs(tmp_path, monkeypatch)
     (tmp_path / "steps" / "normalize" / "pass_through.py").write_text(
         textwrap.dedent(
             """
-            def run(ctx, input, output):
+            def run(ctx, input):
                 return {"output": input}
 
             run.declared_inputs = ["input"]

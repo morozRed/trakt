@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from trakt.core.artifacts import Artifact
+from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, StepBindingError
@@ -150,7 +150,7 @@ def _parse_steps(raw_steps: Any, registry: StepRegistry) -> list[ResolvedStep]:
     return parsed
 
 
-def _parse_outputs(raw_outputs: Any) -> dict[str, str]:
+def _parse_outputs(raw_outputs: Any) -> dict[str, OutputDataset]:
     if raw_outputs is None:
         return {}
 
@@ -159,7 +159,7 @@ def _parse_outputs(raw_outputs: Any) -> dict[str, str]:
         if not isinstance(datasets, list):
             raise PipelineLoadError("Pipeline 'outputs.datasets' must be a list.")
 
-        parsed: dict[str, str] = {}
+        parsed: dict[str, OutputDataset] = {}
         for dataset in datasets:
             if not isinstance(dataset, dict):
                 raise PipelineLoadError("Each output dataset must be a mapping.")
@@ -169,17 +169,71 @@ def _parse_outputs(raw_outputs: Any) -> dict[str, str]:
                 raise PipelineLoadError(
                     "Each output dataset must define string fields 'name' and 'from'."
                 )
-            parsed[name] = source
+            metadata = dataset.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                raise PipelineLoadError(
+                    f"Output dataset '{name}' field 'metadata' must be a mapping."
+                )
+            metadata = dict(metadata)
+            known_keys = {"name", "from", "kind", "uri", "metadata"}
+            for key, value in dataset.items():
+                if key not in known_keys:
+                    metadata[key] = value
+            parsed[name] = OutputDataset(
+                name=name,
+                source=source,
+                kind=_coerce_optional_string(dataset.get("kind"), "kind", output_name=name),
+                uri=_coerce_optional_string(dataset.get("uri"), "uri", output_name=name),
+                metadata=metadata,
+            )
         return parsed
 
     if isinstance(raw_outputs, dict):
-        parsed_outputs: dict[str, str] = {}
-        for name, source in raw_outputs.items():
+        parsed_outputs: dict[str, OutputDataset] = {}
+        for name, source_definition in raw_outputs.items():
+            output_name = str(name)
+            if isinstance(source_definition, str):
+                parsed_outputs[output_name] = OutputDataset(
+                    name=output_name,
+                    source=source_definition,
+                )
+                continue
+
+            if not isinstance(source_definition, dict):
+                raise PipelineLoadError(
+                    f"Output '{output_name}' must map to a string source artifact or mapping."
+                )
+
+            source = source_definition.get("from")
             if not isinstance(source, str):
                 raise PipelineLoadError(
-                    f"Output '{name}' must map to a string source artifact."
+                    f"Output '{output_name}' mapping must define string field 'from'."
                 )
-            parsed_outputs[str(name)] = source
+            metadata = source_definition.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                raise PipelineLoadError(
+                    f"Output '{output_name}' field 'metadata' must be a mapping."
+                )
+            metadata = dict(metadata)
+            known_keys = {"from", "kind", "uri", "metadata"}
+            for key, value in source_definition.items():
+                if key not in known_keys:
+                    metadata[key] = value
+            parsed_outputs[output_name] = OutputDataset(
+                name=output_name,
+                source=source,
+                kind=_coerce_optional_string(
+                    source_definition.get("kind"),
+                    "kind",
+                    output_name=output_name,
+                ),
+                uri=_coerce_optional_string(
+                    source_definition.get("uri"),
+                    "uri",
+                    output_name=output_name,
+                ),
+                metadata=metadata,
+            )
         return parsed_outputs
 
     raise PipelineLoadError("Pipeline 'outputs' must be a mapping.")
@@ -213,3 +267,14 @@ def _coerce_execution_mode(value: Any, field_name: str) -> str:
     if not isinstance(value, str):
         raise PipelineLoadError(f"Pipeline '{field_name}' must be a string.")
     return value.strip().lower() or "batch"
+
+
+def _coerce_optional_string(value: Any, field: str, *, output_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PipelineLoadError(
+            f"Output '{output_name}' field '{field}' must be a string when provided."
+        )
+    normalized = value.strip()
+    return normalized or None

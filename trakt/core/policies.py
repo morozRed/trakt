@@ -1,6 +1,7 @@
 """Reusable policy helpers for join, dedupe, and rename operations."""
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -32,6 +33,19 @@ class RenamePolicy:
     required: list[str] = field(default_factory=list)
     optional: list[str] = field(default_factory=list)
     warn_on_missing_optional: bool = True
+
+
+@dataclass(slots=True)
+class QualityGatePolicy:
+    """Declarative data-quality checks with warn/fail modes."""
+
+    mode: str = "fail"  # fail | warn
+    required_columns: list[str] = field(default_factory=list)
+    unique_keys: list[list[str]] = field(default_factory=list)
+    row_count_min: int | None = None
+    row_count_max: int | None = None
+    max_null_ratio: dict[str, float] = field(default_factory=dict)
+    gate_modes: dict[str, str] = field(default_factory=dict)
 
 
 def apply_join_policy(
@@ -150,12 +164,139 @@ def apply_rename_policy(data: Any, policy: RenamePolicy, *, ctx: Any | None = No
     return renamed
 
 
+def evaluate_quality_gates(
+    data: Any,
+    policy: QualityGatePolicy | Mapping[str, Any],
+    *,
+    ctx: Any | None = None,
+) -> tuple[Any, dict[str, int]]:
+    """Evaluate quality checks and return passthrough data + gate metrics."""
+    normalized = _coerce_quality_policy(policy)
+    _validate_quality_policy(normalized)
+    _validate_dataframe_like(data)
+
+    metrics = {
+        "quality_checks": 0,
+        "quality_violations": 0,
+        "quality_warnings": 0,
+    }
+
+    if normalized.required_columns:
+        metrics["quality_checks"] += 1
+        missing = sorted(set(normalized.required_columns) - set(data.columns))
+        if missing:
+            _handle_quality_violation(
+                gate_name="required_columns",
+                message=f"Missing required columns: {missing}.",
+                policy=normalized,
+                metrics=metrics,
+                ctx=ctx,
+                details={"columns": missing},
+            )
+
+    if normalized.unique_keys:
+        for keys in normalized.unique_keys:
+            metrics["quality_checks"] += 1
+            missing = sorted(set(keys) - set(data.columns))
+            if missing:
+                _handle_quality_violation(
+                    gate_name="unique_keys",
+                    message=f"Unique key columns missing: {missing}.",
+                    policy=normalized,
+                    metrics=metrics,
+                    ctx=ctx,
+                    details={"keys": keys, "missing_columns": missing},
+                )
+                continue
+            duplicate_count = int(len(data) - len(data.drop_duplicates(subset=keys)))
+            if duplicate_count > 0:
+                _handle_quality_violation(
+                    gate_name="unique_keys",
+                    message=(
+                        f"Found {duplicate_count} duplicate rows for unique keys {keys}."
+                    ),
+                    policy=normalized,
+                    metrics=metrics,
+                    ctx=ctx,
+                    details={"keys": keys, "duplicate_rows": duplicate_count},
+                )
+
+    if normalized.row_count_min is not None or normalized.row_count_max is not None:
+        metrics["quality_checks"] += 1
+        row_count = int(len(data))
+        if normalized.row_count_min is not None and row_count < normalized.row_count_min:
+            _handle_quality_violation(
+                gate_name="row_count",
+                message=(
+                    f"Row count {row_count} is below minimum {normalized.row_count_min}."
+                ),
+                policy=normalized,
+                metrics=metrics,
+                ctx=ctx,
+                details={
+                    "row_count": row_count,
+                    "min": normalized.row_count_min,
+                },
+            )
+        if normalized.row_count_max is not None and row_count > normalized.row_count_max:
+            _handle_quality_violation(
+                gate_name="row_count",
+                message=(
+                    f"Row count {row_count} exceeds maximum {normalized.row_count_max}."
+                ),
+                policy=normalized,
+                metrics=metrics,
+                ctx=ctx,
+                details={
+                    "row_count": row_count,
+                    "max": normalized.row_count_max,
+                },
+            )
+
+    for column, threshold in normalized.max_null_ratio.items():
+        metrics["quality_checks"] += 1
+        if column not in data.columns:
+            _handle_quality_violation(
+                gate_name="max_null_ratio",
+                message=f"Null ratio column is missing: {column}.",
+                policy=normalized,
+                metrics=metrics,
+                ctx=ctx,
+                details={"column": column, "max_null_ratio": threshold},
+            )
+            continue
+        null_ratio = float(data[column].isna().mean())
+        if null_ratio > threshold:
+            _handle_quality_violation(
+                gate_name="max_null_ratio",
+                message=(
+                    f"Column '{column}' null ratio {null_ratio:.4f} exceeds threshold {threshold:.4f}."
+                ),
+                policy=normalized,
+                metrics=metrics,
+                ctx=ctx,
+                details={
+                    "column": column,
+                    "null_ratio": null_ratio,
+                    "max_null_ratio": threshold,
+                },
+            )
+
+    return data, metrics
+
+
 def _sort_frame(data: Any, order_by: str | None, *, ascending: bool) -> Any:
     if order_by is None:
         raise ValueError("Dedupe policy requires 'order_by' for this winner rule.")
     if order_by not in data.columns:
         raise ValueError(f"Dedupe order_by column is missing: {order_by}.")
     return data.sort_values(order_by, ascending=ascending)
+
+
+def _validate_dataframe_like(data: Any) -> None:
+    required_attrs = ("columns", "drop_duplicates")
+    if not all(hasattr(data, attr) for attr in required_attrs):
+        raise TypeError("Quality gates require a pandas DataFrame-like input.")
 
 
 def _validate_join_inputs(left: Any, right: Any) -> None:
@@ -180,6 +321,145 @@ def _validate_dedupe_policy(policy: DedupePolicy) -> None:
     supported = {"latest", "earliest", "max", "min", "first", "last", "non_null"}
     if policy.winner not in supported:
         raise ValueError(f"Unsupported dedupe winner policy: {policy.winner}.")
+
+
+def _coerce_quality_policy(policy: QualityGatePolicy | Mapping[str, Any]) -> QualityGatePolicy:
+    if isinstance(policy, QualityGatePolicy):
+        return policy
+    if not isinstance(policy, Mapping):
+        raise TypeError("Quality gate policy must be a QualityGatePolicy or mapping.")
+
+    unique_keys_raw = policy.get("unique_keys", [])
+    unique_keys = _normalize_unique_keys(unique_keys_raw)
+
+    row_count = policy.get("row_count") or {}
+    if row_count is None:
+        row_count = {}
+    if not isinstance(row_count, Mapping):
+        raise TypeError("Quality gate 'row_count' must be a mapping when provided.")
+    gate_modes = policy.get("gate_modes") or {}
+    if not isinstance(gate_modes, Mapping):
+        raise TypeError("Quality gate 'gate_modes' must be a mapping when provided.")
+
+    return QualityGatePolicy(
+        mode=str(policy.get("mode", "fail")),
+        required_columns=_normalize_string_list(
+            policy.get("required_columns", []),
+            field_name="required_columns",
+        ),
+        unique_keys=unique_keys,
+        row_count_min=_coerce_optional_int(row_count.get("min")),
+        row_count_max=_coerce_optional_int(row_count.get("max")),
+        max_null_ratio=_coerce_max_null_ratio(policy.get("max_null_ratio", {})),
+        gate_modes={
+            str(name): str(mode)
+            for name, mode in gate_modes.items()
+        },
+    )
+
+
+def _normalize_unique_keys(value: Any) -> list[list[str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("Quality gate 'unique_keys' must be a list.")
+    normalized: list[list[str]] = []
+    for item in value:
+        if isinstance(item, str):
+            normalized.append([item])
+            continue
+        if isinstance(item, list):
+            normalized.append([str(column) for column in item])
+            continue
+        raise TypeError("Quality gate 'unique_keys' items must be strings or lists.")
+    return normalized
+
+
+def _normalize_string_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError(f"Quality gate '{field_name}' must be a list.")
+    return [str(item) for item in value]
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TypeError("Quality gate integer thresholds cannot be booleans.")
+    if isinstance(value, (int, float)):
+        return int(value)
+    raise TypeError("Quality gate row_count thresholds must be numeric.")
+
+
+def _coerce_max_null_ratio(value: Any) -> dict[str, float]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("Quality gate 'max_null_ratio' must be a mapping.")
+    normalized: dict[str, float] = {}
+    for column, threshold in value.items():
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            raise TypeError(
+                f"Quality gate max_null_ratio for column '{column}' must be numeric."
+            )
+        normalized[str(column)] = float(threshold)
+    return normalized
+
+
+def _validate_quality_policy(policy: QualityGatePolicy) -> None:
+    default_mode = _normalize_quality_mode(policy.mode, field_name="mode")
+    policy.mode = default_mode
+    policy.gate_modes = {
+        str(name): _normalize_quality_mode(mode, field_name=f"gate_modes.{name}")
+        for name, mode in policy.gate_modes.items()
+    }
+    if policy.row_count_min is not None and policy.row_count_min < 0:
+        raise ValueError("Quality gate row_count min must be >= 0.")
+    if policy.row_count_max is not None and policy.row_count_max < 0:
+        raise ValueError("Quality gate row_count max must be >= 0.")
+    if (
+        policy.row_count_min is not None
+        and policy.row_count_max is not None
+        and policy.row_count_min > policy.row_count_max
+    ):
+        raise ValueError("Quality gate row_count min cannot exceed max.")
+    for column, threshold in policy.max_null_ratio.items():
+        if threshold < 0 or threshold > 1:
+            raise ValueError(
+                f"Quality gate max_null_ratio for '{column}' must be between 0 and 1."
+            )
+
+
+def _normalize_quality_mode(value: Any, *, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"Quality gate {field_name} must be a string.")
+    normalized = value.strip().lower()
+    if normalized not in {"warn", "fail"}:
+        raise ValueError(f"Unsupported quality gate mode '{value}'.")
+    return normalized
+
+
+def _handle_quality_violation(
+    *,
+    gate_name: str,
+    message: str,
+    policy: QualityGatePolicy,
+    metrics: dict[str, int],
+    ctx: Any | None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    metrics["quality_violations"] += 1
+    mode = policy.gate_modes.get(gate_name, policy.mode)
+    payload = dict(details or {})
+    payload["gate"] = gate_name
+    payload["message"] = message
+    if mode == "warn":
+        metrics["quality_warnings"] += 1
+        _emit_policy_event(ctx, "warning.quality_gate", **payload)
+        return
+    raise ValueError(message)
 
 
 def _emit_policy_event(ctx: Any | None, event_name: str, **attributes: Any) -> None:

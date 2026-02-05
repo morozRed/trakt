@@ -3,7 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable, Self
 
-from trakt.core.artifacts import Artifact
+from trakt.core.artifacts import Artifact, OutputDataset
+from trakt.core.bindings import const, get_const_binding_value, is_const_binding
 from trakt.core.pipeline import Pipeline
 from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, StepBindingError
@@ -138,7 +139,7 @@ class WorkflowBuilder:
     registry: StepRegistry | None = None
     _inputs: dict[str, Artifact] = field(default_factory=dict)
     _steps: list[WorkflowStep] = field(default_factory=list)
-    _outputs: dict[str, str] = field(default_factory=dict)
+    _outputs: dict[str, OutputDataset] = field(default_factory=dict)
 
     def source(self, spec: WorkflowArtifact | Artifact) -> Self:
         """Register one input artifact."""
@@ -187,8 +188,22 @@ class WorkflowBuilder:
             self.step(spec)
         return self
 
-    def output(self, name: str, *, from_: str) -> Self:
-        self._outputs[name] = from_
+    def output(
+        self,
+        name: str,
+        *,
+        from_: str,
+        kind: str | None = None,
+        uri: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Self:
+        self._outputs[name] = OutputDataset(
+            name=name,
+            source=from_,
+            kind=kind,
+            uri=uri,
+            metadata=dict(metadata or {}),
+        )
         return self
 
     def build(self, *, registry: StepRegistry | None = None) -> Pipeline:
@@ -316,6 +331,8 @@ def _artifact_name(
 
 
 def _normalize_binding_value(value: Any, *, step_id: str, binding_key: str) -> Any:
+    if is_const_binding(value):
+        return const(get_const_binding_value(value))
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, (WorkflowArtifact, Artifact)):

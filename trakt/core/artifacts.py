@@ -30,6 +30,17 @@ class Artifact:
             self.combine_strategy = CombineStrategy(self.combine_strategy)
 
 
+@dataclass(slots=True)
+class OutputDataset:
+    """Output dataset declaration with optional per-dataset config."""
+
+    name: str
+    source: str
+    kind: str | None = None
+    uri: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def combine_artifact_frames(
     frames: Sequence[Any], strategy: CombineStrategy | str
 ) -> Any:

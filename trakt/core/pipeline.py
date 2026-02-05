@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from trakt.core.artifacts import Artifact
+from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.steps import Step
 
 
@@ -75,7 +75,7 @@ class Pipeline:
     execution_mode: str = "batch"
     inputs: dict[str, Artifact] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
-    outputs: dict[str, str] = field(default_factory=dict)
+    outputs: dict[str, OutputDataset | str] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate input/output wiring across the full step chain."""
@@ -120,11 +120,11 @@ class Pipeline:
             for name in set(self.inputs) - used_pipeline_inputs
             if _is_required_input(self.inputs[name])
         )
-        unknown_output_bindings = [
-            (target, source)
-            for target, source in self.outputs.items()
-            if source not in available_names
-        ]
+        unknown_output_bindings: list[tuple[str, str]] = []
+        for target, output_spec in self.outputs.items():
+            source = _output_source(target, output_spec)
+            if source not in available_names:
+                unknown_output_bindings.append((target, source))
 
         if (
             invalid_execution_mode
@@ -151,3 +151,14 @@ def _is_required_input(artifact: Artifact) -> bool:
     if isinstance(required_flag, str):
         return required_flag.lower() not in {"false", "0", "no"}
     return bool(required_flag)
+
+
+def _output_source(name: str, output_spec: OutputDataset | str) -> str:
+    if isinstance(output_spec, OutputDataset):
+        return output_spec.source
+    if isinstance(output_spec, str):
+        return output_spec
+    raise TypeError(
+        f"Pipeline output '{name}' must be a string or OutputDataset, got "
+        f"{type(output_spec).__name__}."
+    )

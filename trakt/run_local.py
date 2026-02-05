@@ -13,7 +13,11 @@ def main() -> None:
     parser.add_argument("--pipeline", help="Pipeline name under pipelines/<name>/pipeline.yaml")
     parser.add_argument("--pipeline-file", help="Explicit path to pipeline YAML file")
     parser.add_argument("--input-dir", default=".", help="Base directory for local input files")
-    parser.add_argument("--output-dir", default="outputs", help="Directory for CSV outputs")
+    parser.add_argument(
+        "--output-dir",
+        default="outputs",
+        help="Directory for output artifacts and manifest.",
+    )
     parser.add_argument(
         "--input",
         action="append",

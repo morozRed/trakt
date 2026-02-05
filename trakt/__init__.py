@@ -1,15 +1,23 @@
 """Public package interface for the Trakt ETL framework."""
 
-from trakt.core.artifacts import Artifact, CombineStrategy, combine_artifact_frames
+from trakt.core.artifacts import (
+    Artifact,
+    CombineStrategy,
+    OutputDataset,
+    combine_artifact_frames,
+)
+from trakt.core.bindings import Const
 from trakt.core.context import Context
 from trakt.core.loader import PipelineLoadError, load_pipeline_from_yaml
 from trakt.core.policies import (
     DedupePolicy,
     JoinPolicy,
+    QualityGatePolicy,
     RenamePolicy,
     apply_dedupe_policy,
     apply_join_policy,
     apply_rename_policy,
+    evaluate_quality_gates,
 )
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
@@ -19,6 +27,7 @@ from trakt.core.workflow import (
     WorkflowBuilder,
     WorkflowStep,
     artifact,
+    const,
     step,
     workflow,
 )
@@ -33,6 +42,8 @@ __all__ = [
     "ArtifactAdapterRegistry",
     "Artifact",
     "CombineStrategy",
+    "OutputDataset",
+    "Const",
     "Context",
     "DedupePolicy",
     "CsvArtifactAdapter",
@@ -41,6 +52,7 @@ __all__ = [
     "Pipeline",
     "PipelineLoadError",
     "PipelineValidationError",
+    "QualityGatePolicy",
     "RenamePolicy",
     "GlueRunner",
     "LambdaRunner",
@@ -56,8 +68,10 @@ __all__ = [
     "apply_dedupe_policy",
     "apply_join_policy",
     "apply_rename_policy",
+    "evaluate_quality_gates",
     "combine_artifact_frames",
     "load_pipeline_from_yaml",
     "step",
     "workflow",
+    "const",
 ]

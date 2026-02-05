@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from trakt.core.artifacts import OutputDataset
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.steps import Step
 
@@ -87,6 +88,24 @@ def test_pipeline_validation_accepts_stream_capable_step() -> None:
             )
         ],
         outputs={"dataset": "records"},
+    )
+
+    pipeline.validate()
+
+
+def test_pipeline_validation_supports_output_dataset_objects() -> None:
+    pipeline = Pipeline(
+        name="output_objects",
+        inputs={},
+        steps=[DummyStep(id="s1", outputs=["records"])],
+        outputs={
+            "dataset": OutputDataset(
+                name="dataset",
+                source="records",
+                kind="csv",
+                uri="custom/records.csv",
+            )
+        },
     )
 
     pipeline.validate()

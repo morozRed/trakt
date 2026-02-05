@@ -37,6 +37,8 @@ class ArtifactAdapter(ABC):
         *,
         artifact_name: str | None = None,
         execution_mode: str = "batch",
+        artifact: Artifact | None = None,
+        **kwargs: Any,
     ) -> None:
         """Persist payload to the provided URI."""
 
@@ -80,11 +82,14 @@ class CsvArtifactAdapter(ArtifactAdapter):
         *,
         artifact_name: str | None = None,
         execution_mode: str = "batch",
+        artifact: Artifact | None = None,
+        **kwargs: Any,
     ) -> None:
+        write_options = _csv_write_options(artifact)
         if execution_mode == "stream":
-            _write_csv_stream(data, uri)
+            _write_csv_stream(data, uri, **write_options)
             return
-        write_csv(data, uri)
+        write_csv(data, uri, **write_options)
 
 
 @dataclass(slots=True)
@@ -128,18 +133,64 @@ class ArtifactAdapterRegistry:
 
 
 def _csv_read_options(artifact: Artifact) -> dict[str, Any]:
+    metadata = dict(artifact.metadata or {})
+    options = _coerce_options_mapping(
+        metadata.get("read_options"),
+        field_name=f"input '{artifact.name}' metadata.read_options",
+    )
     supported_keys = {
         "delimiter",
         "encoding",
         "header",
         "date_columns",
         "decimal",
+        "quotechar",
+        "escapechar",
+        "skipinitialspace",
+        "dtype",
+        "na_values",
+        "keep_default_na",
+        "delimiter_candidates",
     }
-    return {
-        key: value
-        for key, value in artifact.metadata.items()
-        if key in supported_keys and value is not None
+    for key in supported_keys:
+        value = metadata.get(key)
+        if value is not None:
+            options[key] = value
+
+    delimiter_mode = metadata.get("delimiter_mode")
+    if (
+        isinstance(delimiter_mode, str)
+        and delimiter_mode.strip().lower() in {"auto", "sniff"}
+        and "delimiter" not in options
+    ):
+        options["delimiter"] = "auto"
+    return options
+
+
+def _csv_write_options(artifact: Artifact | None) -> dict[str, Any]:
+    if artifact is None:
+        return {}
+
+    metadata = dict(artifact.metadata or {})
+    options = _coerce_options_mapping(
+        metadata.get("write_options"),
+        field_name=f"output '{artifact.name}' metadata.write_options",
+    )
+    supported_keys = {
+        "delimiter",
+        "encoding",
+        "header",
+        "index",
+        "decimal",
+        "quotechar",
+        "escapechar",
+        "lineterminator",
     }
+    for key in supported_keys:
+        value = metadata.get(key)
+        if value is not None:
+            options[key] = value
+    return options
 
 
 def _iter_csv_chunks(
@@ -154,7 +205,7 @@ def _iter_csv_chunks(
             yield chunk
 
 
-def _write_csv_stream(data: Any, uri: str) -> None:
+def _write_csv_stream(data: Any, uri: str, **write_options: Any) -> None:
     if hasattr(data, "to_csv"):
         raise TypeError(
             "CSV stream writing expects an iterable of chunks, not a single DataFrame."
@@ -166,12 +217,15 @@ def _write_csv_stream(data: Any, uri: str) -> None:
         )
 
     wrote_any_chunk = False
+    initial_header = bool(write_options.pop("header", True))
     for chunk in data:
+        chunk_options = dict(write_options)
         write_csv(
             chunk,
             uri,
-            header=not wrote_any_chunk,
+            header=initial_header if not wrote_any_chunk else False,
             mode="w" if not wrote_any_chunk else "a",
+            **chunk_options,
         )
         wrote_any_chunk = True
 
@@ -179,6 +233,14 @@ def _write_csv_stream(data: Any, uri: str) -> None:
         # Persist an empty file so output contracts remain deterministic.
         Path(uri).parent.mkdir(parents=True, exist_ok=True)
         Path(uri).write_text("", encoding="utf-8")
+
+
+def _coerce_options_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a mapping when provided.")
+    return dict(value)
 
 
 def _normalize_kind(kind: str) -> str:

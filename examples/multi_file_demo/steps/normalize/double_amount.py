@@ -1,4 +1,4 @@
-def run(ctx, records, normalized):
+def run(ctx, records):
     frame = records.copy()
     frame["amount"] = frame["amount"] * 2
     return {"normalized": frame}

@@ -1,10 +1,11 @@
 """Step contract used by pipeline execution."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from trakt.core.bindings import is_const_binding
 from trakt.core.context import Context
 
 StepHandler = Callable[..., dict[str, Any]]
@@ -79,6 +80,13 @@ class ResolvedStep(Step):
         return step
 
     def validate_bindings(self) -> None:
+        overlapping_names = sorted(set(self.declared_inputs) & set(self.declared_outputs))
+        if overlapping_names:
+            raise StepBindingError(
+                f"Step '{self.id}' cannot declare the same name as input and output: "
+                + ", ".join(overlapping_names)
+            )
+
         missing_inputs = [
             name for name in self.declared_inputs if name not in self.bindings
         ]
@@ -96,25 +104,32 @@ class ResolvedStep(Step):
                 f"Step '{self.id}' binding error: " + "; ".join(details)
             )
 
+        for output_key, output_binding in self.output_bindings().items():
+            _coerce_output_binding_values(output_binding, step_id=self.id, key=output_key)
+
+        for input_key, input_binding in self.input_bindings().items():
+            _collect_input_artifact_refs(input_binding, step_id=self.id, key=input_key)
+
     def run(self, ctx: Context, **kwargs: Any) -> dict[str, Any]:
-        params = dict(self.bindings)
-        params.update(kwargs)
-        return self.handler(ctx, **params)
+        return self.handler(ctx, **kwargs)
 
     def input_bindings(self) -> dict[str, Any]:
         if self.declared_inputs:
-            return {name: self.bindings[name] for name in self.declared_inputs}
-
-        bindings: dict[str, Any] = {}
-        if "input" in self.bindings:
-            bindings["input"] = self.bindings["input"]
-        if "inputs" in self.bindings:
-            bindings["inputs"] = self.bindings["inputs"]
-        return bindings
+            return {
+                name: self.bindings[name]
+                for name in self.declared_inputs
+                if name in self.bindings
+            }
+        output_keys = self._output_binding_keys()
+        return {key: value for key, value in self.bindings.items() if key not in output_keys}
 
     def output_bindings(self) -> dict[str, Any]:
         if self.declared_outputs:
-            return {name: self.bindings[name] for name in self.declared_outputs}
+            return {
+                name: self.bindings[name]
+                for name in self.declared_outputs
+                if name in self.bindings
+            }
 
         bindings: dict[str, Any] = {}
         if "output" in self.bindings:
@@ -124,64 +139,34 @@ class ResolvedStep(Step):
         return bindings
 
     def _resolve_bound_inputs(self) -> list[str]:
-        if self.declared_inputs:
-            return _resolve_named_bindings(
-                bindings=self.bindings,
-                keys=self.declared_inputs,
-                step_id=self.id,
-                binding_kind="input",
-            )
-
-        return _resolve_default_inputs(self.bindings, step_id=self.id)
+        names: list[str] = []
+        for key, value in self.input_bindings().items():
+            names.extend(_collect_input_artifact_refs(value, step_id=self.id, key=key))
+        return list(dict.fromkeys(names))
 
     def _resolve_bound_outputs(self) -> list[str]:
+        names: list[str] = []
+        for key, value in self.output_bindings().items():
+            names.extend(_coerce_output_binding_values(value, step_id=self.id, key=key))
+        return list(dict.fromkeys(names))
+
+    def _output_binding_keys(self) -> set[str]:
         if self.declared_outputs:
-            return _resolve_named_bindings(
-                bindings=self.bindings,
-                keys=self.declared_outputs,
-                step_id=self.id,
-                binding_kind="output",
-            )
+            return set(self.declared_outputs)
 
-        return _resolve_default_outputs(self.bindings, step_id=self.id)
-
-
-def _resolve_default_inputs(bindings: dict[str, Any], step_id: str) -> list[str]:
-    names: list[str] = []
-    if "input" in bindings:
-        names.extend(_coerce_binding_values(bindings["input"], step_id, "input"))
-    if "inputs" in bindings:
-        names.extend(_coerce_binding_values(bindings["inputs"], step_id, "inputs"))
-    return names
+        keys: set[str] = set()
+        if "output" in self.bindings:
+            keys.add("output")
+        if "outputs" in self.bindings:
+            keys.add("outputs")
+        return keys
 
 
-def _resolve_default_outputs(bindings: dict[str, Any], step_id: str) -> list[str]:
-    names: list[str] = []
-    if "output" in bindings:
-        names.extend(_coerce_binding_values(bindings["output"], step_id, "output"))
-    if "outputs" in bindings:
-        names.extend(_coerce_binding_values(bindings["outputs"], step_id, "outputs"))
-    return names
-
-
-def _resolve_named_bindings(
-    *,
-    bindings: dict[str, Any],
-    keys: list[str],
-    step_id: str,
-    binding_kind: str,
-) -> list[str]:
-    names: list[str] = []
-    for key in keys:
-        if key not in bindings:
-            raise StepBindingError(
-                f"Step '{step_id}' missing {binding_kind} binding '{key}'."
-            )
-        names.extend(_coerce_binding_values(bindings[key], step_id, key))
-    return names
-
-
-def _coerce_binding_values(value: Any, step_id: str, key: str) -> list[str]:
+def _coerce_output_binding_values(value: Any, *, step_id: str, key: str) -> list[str]:
+    if is_const_binding(value):
+        raise StepBindingError(
+            f"Step '{step_id}' output binding '{key}' cannot use const literals."
+        )
     if isinstance(value, str):
         return [value]
     if isinstance(value, list):
@@ -199,7 +184,36 @@ def _coerce_binding_values(value: Any, step_id: str, key: str) -> list[str]:
         return dict_values
 
     raise StepBindingError(
-        f"Step '{step_id}' binding '{key}' must be a string, list, or mapping."
+        f"Step '{step_id}' output binding '{key}' must be a string, list, or mapping."
+    )
+
+
+def _collect_input_artifact_refs(value: Any, *, step_id: str, key: str) -> list[str]:
+    if is_const_binding(value):
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return []
+    if isinstance(value, list):
+        names: list[str] = []
+        for item in value:
+            names.extend(_collect_input_artifact_refs(item, step_id=step_id, key=key))
+        return names
+    if isinstance(value, tuple):
+        names: list[str] = []
+        for item in value:
+            names.extend(_collect_input_artifact_refs(item, step_id=step_id, key=key))
+        return names
+    if isinstance(value, Mapping):
+        names: list[str] = []
+        for item in value.values():
+            names.extend(_collect_input_artifact_refs(item, step_id=step_id, key=key))
+        return names
+
+    raise StepBindingError(
+        f"Step '{step_id}' input binding '{key}' has unsupported type "
+        f"{type(value).__name__}; expected artifact refs, const literals, or primitive values."
     )
 
 

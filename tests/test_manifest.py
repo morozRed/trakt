@@ -25,7 +25,7 @@ def test_runner_writes_manifest_even_on_failure(tmp_path, monkeypatch) -> None:
     (tmp_path / "steps" / "normalize" / "explode.py").write_text(
         textwrap.dedent(
             """
-            def run(ctx, input, output):
+            def run(ctx, input):
                 raise ValueError("boom")
 
             run.declared_inputs = ["input"]
@@ -78,3 +78,71 @@ def test_runner_writes_manifest_even_on_failure(tmp_path, monkeypatch) -> None:
     assert manifest["run_id"] == "failure-run"
     assert manifest["status"] == "failed"
     assert manifest["error"]["type"] == "ValueError"
+
+
+def test_runner_persists_step_metrics_in_manifest(tmp_path, monkeypatch) -> None:
+    (tmp_path / "steps" / "normalize").mkdir(parents=True)
+    (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "metrics.py").write_text(
+        textwrap.dedent(
+            """
+            def run(ctx, input):
+                return {
+                    "output": input,
+                    "__metrics__": {
+                        "rows_dropped": 2,
+                        "matched": 10,
+                        "unmatched": 1,
+                    },
+                }
+
+            run.declared_inputs = ["input"]
+            run.declared_outputs = ["output"]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.csv").write_text("id,amount\n1,10\n", encoding="utf-8")
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: metrics_pipeline
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: metrics_step
+                uses: steps.normalize.metrics
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file)
+    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir)
+    result = runner.run(pipeline, run_id="metrics-run")
+    assert result["status"] == "success"
+
+    manifest_path = output_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    metrics = manifest["steps"][0]["metrics"]
+    assert metrics["rows_dropped"] == 2
+    assert metrics["matched"] == 10
+    assert metrics["unmatched"] == 1

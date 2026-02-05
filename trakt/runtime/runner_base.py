@@ -8,6 +8,7 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
+from trakt.core.bindings import get_const_binding_value, is_const_binding
 from trakt.core.context import Context
 from trakt.core.pipeline import Pipeline
 from trakt.core.steps import ResolvedStep, Step
@@ -153,14 +154,16 @@ class RunnerBase(ABC):
                 started = perf_counter()
                 raw_result = step.run(ctx, **step_kwargs)
                 duration_ms = round((perf_counter() - started) * 1000, 3)
+                step_result, step_metrics = _extract_step_metrics(step.id, raw_result)
 
-                materialized = self._materialize_step_outputs(step, raw_result)
+                materialized = self._materialize_step_outputs(step, step_result)
                 artifacts.update(materialized)
                 rows_out = _count_rows(materialized)
 
                 _set_span_attribute(step_span, "rows.in", rows_in)
                 _set_span_attribute(step_span, "rows.out", rows_out)
                 _set_span_attribute(step_span, "duration.ms", duration_ms)
+                _set_step_metric_span_attributes(step_span, step_metrics)
 
                 ctx.emit_event(
                     "step.completed",
@@ -168,6 +171,7 @@ class RunnerBase(ABC):
                     duration_ms=duration_ms,
                     rows_in=rows_in,
                     rows_out=rows_out,
+                    metrics=step_metrics,
                 )
             finally:
                 ctx.add_metadata("active_span", None)
@@ -177,6 +181,7 @@ class RunnerBase(ABC):
             "rows_in": rows_in,
             "rows_out": rows_out,
             "outputs": list(materialized),
+            "metrics": step_metrics,
         }
 
     def get_manifest_path(self, ctx: Context, **kwargs: Any) -> Path:
@@ -219,9 +224,18 @@ class RunnerBase(ABC):
                     "rows_out": report.get("rows_out"),
                     "duration_ms": report.get("duration_ms"),
                     "outputs": report.get("outputs", []),
+                    "metrics": report.get("metrics", {}),
                     "files_read": report.get("files_read"),
-                    "rows_dropped": report.get("rows_dropped"),
-                    "rows_unmatched": report.get("rows_unmatched"),
+                    "rows_dropped": (
+                        report.get("rows_dropped")
+                        if report.get("rows_dropped") is not None
+                        else report.get("metrics", {}).get("rows_dropped")
+                    ),
+                    "rows_unmatched": (
+                        report.get("rows_unmatched")
+                        if report.get("rows_unmatched") is not None
+                        else report.get("metrics", {}).get("rows_unmatched")
+                    ),
                 }
                 for report in step_reports
             ],
@@ -233,7 +247,7 @@ class RunnerBase(ABC):
         if isinstance(step, ResolvedStep):
             params: dict[str, Any] = {}
             for param_name, bound_name in step.input_bindings().items():
-                params[param_name] = _resolve_bound_artifact(bound_name, artifacts, step.id)
+                params[param_name] = _resolve_bound_input(bound_name, artifacts, step.id)
             return params
 
         params = {}
@@ -269,27 +283,40 @@ class RunnerBase(ABC):
         )
 
 
-def _resolve_bound_artifact(
+def _resolve_bound_input(
     bound_name: Any, artifacts: dict[str, Any], step_id: str
 ) -> Any:
+    if is_const_binding(bound_name):
+        return get_const_binding_value(bound_name)
+
     if isinstance(bound_name, str):
         if bound_name not in artifacts:
             raise KeyError(
-                f"Step '{step_id}' requires artifact '{bound_name}' but it is missing."
+                f"Step '{step_id}' requires artifact '{bound_name}' but it is missing. "
+                "Use const(...) or YAML {'const': ...} for literal strings."
             )
         return artifacts[bound_name]
 
     if isinstance(bound_name, list):
-        return [_resolve_bound_artifact(name, artifacts, step_id) for name in bound_name]
+        return [_resolve_bound_input(name, artifacts, step_id) for name in bound_name]
+
+    if isinstance(bound_name, tuple):
+        return tuple(_resolve_bound_input(name, artifacts, step_id) for name in bound_name)
 
     if isinstance(bound_name, Mapping):
+        if is_const_binding(bound_name):
+            return get_const_binding_value(bound_name)
         return {
-            key: _resolve_bound_artifact(name, artifacts, step_id)
+            key: _resolve_bound_input(name, artifacts, step_id)
             for key, name in bound_name.items()
         }
 
+    if isinstance(bound_name, (bool, int, float)) or bound_name is None:
+        return bound_name
+
     raise TypeError(
-        f"Invalid step binding in step '{step_id}': expected string/list/mapping."
+        f"Invalid step input binding in step '{step_id}': "
+        "expected artifact refs, const literals, list/tuple/mapping, or primitive values."
     )
 
 
@@ -377,6 +404,38 @@ def _set_span_attribute(span: Any, key: str, value: Any) -> None:
     if value is None:
         return
     span.set_attribute(key, value)
+
+
+def _extract_step_metrics(
+    step_id: str, raw_result: Any
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not isinstance(raw_result, dict):
+        raise TypeError(
+            f"Step '{step_id}' must return a dict, got {type(raw_result).__name__}."
+        )
+
+    metrics_key = "__metrics__"
+    if metrics_key not in raw_result:
+        return raw_result, {}
+
+    metrics_value = raw_result[metrics_key]
+    if not isinstance(metrics_value, Mapping):
+        raise TypeError(
+            f"Step '{step_id}' metrics must be a mapping when '{metrics_key}' is returned."
+        )
+
+    metrics = {str(key): value for key, value in metrics_value.items()}
+    payload = {key: value for key, value in raw_result.items() if key != metrics_key}
+    return payload, metrics
+
+
+def _set_step_metric_span_attributes(span: Any, metrics: Mapping[str, Any]) -> None:
+    for key, value in metrics.items():
+        if isinstance(value, bool):
+            _set_span_attribute(span, f"metric.{key}", value)
+            continue
+        if isinstance(value, (int, float)):
+            _set_span_attribute(span, f"metric.{key}", value)
 
 
 def _otel_event_hook(event_name: str, attributes: dict[str, Any], ctx: Context) -> None:

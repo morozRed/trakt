@@ -50,6 +50,11 @@ outputs:
   datasets:
     - name: final
       from: records_norm
+      kind: csv
+      uri: exports/final.csv
+      metadata:
+        write_options:
+          delimiter: "|"
 ```
 
 You can optionally set pipeline execution mode:
@@ -62,7 +67,7 @@ execution:
 Step modules must export `run(ctx, **kwargs)` and can declare bindings:
 
 ```python
-def run(ctx, input, output):
+def run(ctx, input):
     frame = input.copy()
     frame["amount"] = frame["amount"] * 2
     return {"output": frame}
@@ -71,10 +76,29 @@ run.declared_inputs = ["input"]
 run.declared_outputs = ["output"]
 ```
 
+Output bindings are used only to map returned result keys to artifact names.
+Output artifact names are not passed into step handlers at runtime.
+
+Literal string config must be explicit in YAML using `const`:
+
+```yaml
+steps:
+  - id: normalize
+    uses: steps.normalize.double_amount
+    with:
+      input: source__records
+      currency:
+        const: usd
+      output: records_norm
+```
+
+`outputs.datasets` supports per-output `kind`, `uri`, and `metadata`.
+When omitted, runner-level defaults are used.
+
 For stream mode, mark steps as stream-capable and return chunk iterators:
 
 ```python
-def run(ctx, input, output):
+def run(ctx, input):
     def _iter_chunks():
         for chunk in input:
             frame = chunk.copy()
@@ -85,6 +109,34 @@ def run(ctx, input, output):
 run.declared_inputs = ["input"]
 run.declared_outputs = ["output"]
 run.supports_stream = True
+```
+
+Steps can also return metrics using the reserved `__metrics__` key.
+Those metrics are persisted automatically into `manifest.json`:
+
+```python
+def run(ctx, input):
+    return {
+        "output": input,
+        "__metrics__": {
+            "rows_dropped": 12,
+            "matched": 205,
+            "unmatched": 7,
+        },
+    }
+```
+
+CSV delimiter auto-detection is available via `metadata.delimiter: auto`
+or explicit `metadata.read_options`:
+
+```yaml
+inputs:
+  source__records:
+    uri: records.psv
+    metadata:
+      delimiter: auto
+      read_options:
+        encoding: utf-8
 ```
 
 ### Run from CLI (YAML-first)
@@ -180,11 +232,11 @@ print(result["manifest_path"])
 Or define the workflow directly in Python:
 
 ```python
-from trakt import artifact, step, workflow
+from trakt import artifact, const, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
-def double_amount(ctx, input, output):
+def double_amount(ctx, input):
     frame = input.copy()
     frame["amount"] = frame["amount"] * 2
     return {"output": frame}
@@ -196,8 +248,10 @@ double_amount.declared_outputs = ["output"]
 source_records = artifact("source__records").as_kind("csv").at("records.csv")
 double_step = (
     step("double_amount", run=double_amount)
-    .bind_input("source__records")
-    .bind_output("records_norm")
+    .bind(
+        input="source__records",
+        output="records_norm",
+    )
 )
 
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
@@ -210,6 +264,31 @@ result = (
 )
 ```
 
+Literal strings in DSL bindings should use `const(...)`:
+
+```python
+step("normalize", run=double_amount).bind(input="source__records", currency=const("usd"), output="records_norm")
+```
+
+Built-in quality gate step:
+
+```yaml
+- id: quality_gate
+  uses: trakt.steps.quality_gate
+  with:
+    input: records_norm
+    policy:
+      const:
+        mode: warn        # warn or fail
+        required_columns: [id, amount]
+        unique_keys: [id]
+        row_count:
+          min: 1
+        max_null_ratio:
+          amount: 0.05
+    output: records_validated
+```
+
 Multiple inputs for one step:
 
 ```python
@@ -217,7 +296,7 @@ input_1 = artifact("source__records").at("records.csv")
 input_2 = artifact("source__countries").at("countries.csv")
 
 
-def join_inputs(ctx, inputs, output):
+def join_inputs(ctx, inputs):
     left, right = inputs
     return {"output": left.merge(right, on="id", how="left")}
 
@@ -270,10 +349,10 @@ PYTHONPATH=examples/glue_smoke python -m trakt.runtime.glue_main \
 ## Outputs
 
 Each run writes:
-- output CSV files defined by `outputs.datasets`
+- output artifacts defined by `outputs.datasets`
 - `manifest.json` (default: `<output-dir>/manifest.json`)
 
-`manifest.json` includes run status, timings, per-step stats, and error info on failure.
+`manifest.json` includes run status, timings, per-step stats/metrics, and error info on failure.
 
 ## Current Notes
 

@@ -1,7 +1,7 @@
 """Normalize amount and currency fields for Glue smoke testing."""
 
 
-def run(ctx, input, output):
+def run(ctx, input):
     frame = input.copy()
     frame["amount"] = frame["amount"].astype(float).round(2)
     frame["currency"] = frame["currency"].str.upper()

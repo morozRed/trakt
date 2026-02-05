@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from trakt.core.artifacts import Artifact
+from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.pipeline import Pipeline
 from trakt.core.steps import Step
 from trakt.io.adapters import (
@@ -44,6 +44,8 @@ class FancyAdapter(ArtifactAdapter):
         *,
         artifact_name: str | None = None,
         execution_mode: str = "batch",
+        artifact: Artifact | None = None,
+        **kwargs: Any,
     ) -> None:
         Path(uri).write_text(str(data), encoding="utf-8")
         self.write_calls.append((data, uri, artifact_name))
@@ -103,4 +105,52 @@ def test_local_runner_dispatches_custom_adapter(tmp_path) -> None:
         and fancy_adapter.write_calls[0][0] == "loaded-by-fancy"
     )
     assert result["outputs"]["final"]["path"] == str(output_path)
+    assert result["outputs"]["final"]["kind"] == "fancy"
+
+
+def test_local_runner_honors_per_output_kind_override(tmp_path) -> None:
+    fancy_adapter = FancyAdapter()
+    registry = ArtifactAdapterRegistry.with_defaults()
+    registry.register("fancy", fancy_adapter)
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.csv").write_text("id,amount\n1,10\n", encoding="utf-8")
+
+    pipeline = Pipeline(
+        name="per_output_kind_pipeline",
+        inputs={
+            "source__records": Artifact(
+                name="source__records",
+                kind="csv",
+                uri="records.csv",
+            )
+        },
+        steps=[
+            CopyStep(
+                id="copy",
+                inputs=["source__records"],
+                outputs=["records_norm"],
+            )
+        ],
+        outputs={
+            "final": OutputDataset(
+                name="final",
+                source="records_norm",
+                kind="fancy",
+                uri="special/final.fancy",
+            )
+        },
+    )
+
+    runner = LocalRunner(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        adapter_registry=registry,
+    )
+    result = runner.run(pipeline, run_id="per-output-kind-run")
+
+    output_path = output_dir / "special" / "final.fancy"
+    assert output_path.exists()
     assert result["outputs"]["final"]["kind"] == "fancy"

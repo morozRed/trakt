@@ -5,6 +5,7 @@ from pathlib import Path
 from collections.abc import Iterable
 from typing import Any
 
+from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.context import Context
 from trakt.core.pipeline import Pipeline
 from trakt.io.adapters import ArtifactAdapterRegistry
@@ -83,29 +84,45 @@ class LocalRunner(RunnerBase):
     ) -> dict[str, Any]:
         output_dir = Path(kwargs.get("output_dir", self.output_dir))
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_kind = kwargs.get("output_kind", self.output_kind)
-        output_adapter = self.adapter_registry.resolve(output_kind)
-        output_suffix = output_adapter.file_extension or ""
+        default_output_kind = kwargs.get("output_kind", self.output_kind)
 
         persisted: dict[str, Any] = {}
-        for output_name, source_name in pipeline.outputs.items():
+        for output_name, output_binding in pipeline.outputs.items():
+            output_spec = _coerce_output_dataset(output_name, output_binding)
+            source_name = output_spec.source
             if source_name not in artifacts:
                 raise KeyError(
                     f"Pipeline output '{output_name}' references unknown artifact '{source_name}'."
                 )
 
-            target_path = output_dir / f"{output_name}{output_suffix}"
+            output_kind = output_spec.kind or default_output_kind
+            output_adapter = self.adapter_registry.resolve(output_kind)
+            output_suffix = output_adapter.file_extension or ""
+            target_path = _resolve_output_target_path(
+                output_name=output_name,
+                output_uri=output_spec.uri,
+                output_dir=output_dir,
+                default_suffix=output_suffix,
+            )
             data = artifacts[source_name]
+            output_artifact = Artifact(
+                name=output_name,
+                kind=output_kind,
+                uri=str(target_path),
+                metadata=dict(output_spec.metadata),
+            )
             output_adapter.write(
                 data,
                 str(target_path),
                 artifact_name=output_name,
                 execution_mode=pipeline.execution_mode,
+                artifact=output_artifact,
             )
             persisted[output_name] = {
                 "path": str(target_path),
                 "rows": _count_rows(data),
                 "kind": output_kind,
+                "source": source_name,
             }
             ctx.emit_event(
                 "output.written",
@@ -188,3 +205,29 @@ def _count_rows(payload: Any) -> int | None:
         return len(payload)
     except TypeError:
         return None
+
+
+def _coerce_output_dataset(
+    output_name: str, output_binding: OutputDataset | str
+) -> OutputDataset:
+    if isinstance(output_binding, OutputDataset):
+        return output_binding
+    if isinstance(output_binding, str):
+        return OutputDataset(name=output_name, source=output_binding)
+    raise TypeError(
+        f"Pipeline output '{output_name}' must be a string or OutputDataset, got "
+        f"{type(output_binding).__name__}."
+    )
+
+
+def _resolve_output_target_path(
+    *,
+    output_name: str,
+    output_uri: str | None,
+    output_dir: Path,
+    default_suffix: str,
+) -> Path:
+    if output_uri:
+        configured = Path(output_uri)
+        return configured if configured.is_absolute() else output_dir / configured
+    return output_dir / f"{output_name}{default_suffix}"

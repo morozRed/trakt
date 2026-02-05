@@ -4,10 +4,12 @@ import pytest
 from trakt.core.policies import (
     DedupePolicy,
     JoinPolicy,
+    QualityGatePolicy,
     RenamePolicy,
     apply_dedupe_policy,
     apply_join_policy,
     apply_rename_policy,
+    evaluate_quality_gates,
 )
 
 
@@ -127,4 +129,39 @@ def test_rename_policy_raises_for_missing_required_columns() -> None:
         apply_rename_policy(
             data,
             RenamePolicy(mapping={"amount": "total_amount"}, required=["country"]),
+        )
+
+
+def test_quality_gates_warn_mode_emits_events_and_metrics() -> None:
+    data = pd.DataFrame([{"id": 1, "amount": 10}, {"id": 1, "amount": None}])
+    ctx = EventContext()
+
+    _, metrics = evaluate_quality_gates(
+        data,
+        QualityGatePolicy(
+            mode="warn",
+            required_columns=["id", "country"],
+            unique_keys=[["id"]],
+            max_null_ratio={"amount": 0.2},
+        ),
+        ctx=ctx,
+    )
+
+    assert metrics["quality_checks"] >= 3
+    assert metrics["quality_violations"] == 3
+    assert metrics["quality_warnings"] == 3
+    assert len(ctx.events) == 3
+    assert all(event_name == "warning.quality_gate" for event_name, _ in ctx.events)
+
+
+def test_quality_gates_fail_mode_raises_for_duplicate_keys() -> None:
+    data = pd.DataFrame([{"id": 1, "amount": 10}, {"id": 1, "amount": 20}])
+
+    with pytest.raises(ValueError, match="duplicate rows"):
+        evaluate_quality_gates(
+            data,
+            {
+                "mode": "fail",
+                "unique_keys": ["id"],
+            },
         )

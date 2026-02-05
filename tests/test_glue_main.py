@@ -20,7 +20,7 @@ def test_glue_main_runs_pipeline_with_required_contract(tmp_path, monkeypatch) -
     (tmp_path / "steps" / "normalize" / "double_amount.py").write_text(
         textwrap.dedent(
             """
-            def run(ctx, input, output):
+            def run(ctx, input):
                 frame = input.copy()
                 frame["amount"] = frame["amount"] * 2
                 return {"output": frame}
