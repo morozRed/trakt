@@ -1,36 +1,47 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- The repository root is the `etl` Python package (note `__init__.py` at the top level).
-- Pipeline definitions live in `pipelines/<pipeline_name>/pipeline.yaml`.
-- Transform steps are organized by type in `steps/normalize/`, `steps/dedupe/`, `steps/reshape/`, and `steps/enrich/`.
-- Shared helpers live in `steps/shared.py`.
-- Local execution entry point is `run_local.py`.
+- Core framework package is `trakt/`.
+- Main framework modules:
+  - `trakt/core/` (artifacts, pipeline model, loader, step bindings, registry)
+  - `trakt/runtime/` (runner base, local runner, Glue/Lambda stubs)
+  - `trakt/io/` (CSV reader/writer)
+  - `trakt/observability/` (manifest + OTEL helpers)
+- Local CLI entrypoint is `trakt/run_local.py` (`python -m trakt.run_local`).
+- Example pipeline and demo steps live in `examples/multi_file_demo/`.
+- Tests live in `tests/`. Design and planning docs live in `docs/` and `TASKS.md`.
 
 ## Build, Test, and Development Commands
-- Run a pipeline locally by name:
-  `python3 -m etl.run_local --pipeline travel_enrichment__cytric --input-dir <in> --output-dir <out>`
-- Run a pipeline from an explicit YAML path:
-  `python3 -m etl.run_local --pipeline-file pipelines/travel_enrichment__cytric/pipeline.yaml --input-dir <in> --output-dir <out>`
-- Override input discovery with explicit mappings:
-  `--input westtours__cost_centers=/path/to/cost_centers.xlsx`
-- Dependencies are imported directly in code (e.g., `pandas`, `pyyaml`, `openpyxl`); ensure they are installed in your environment.
+- Create env + install (editable):
+  - `python3 -m venv .venv && source .venv/bin/activate`
+  - `python -m pip install -e .`
+- Install dev extras:
+  - `python -m pip install -e ".[dev,excel]"`
+- Run tests:
+  - `python -m pytest -q`
+- Run included example pipeline:
+  - `PYTHONPATH=examples/multi_file_demo python -m trakt.run_local --pipeline-file examples/multi_file_demo/pipeline.yaml --input-dir examples/multi_file_demo/input --output-dir /tmp/trakt-demo-output`
+- Run by pipeline name (when a project provides `pipelines/<name>/pipeline.yaml`):
+  - `python -m trakt.run_local --pipeline <pipeline_name> --input-dir <in> --output-dir <out>`
+- Override an input source:
+  - `--input source__records=/path/to/file.csv`
 
 ## Coding Style & Naming Conventions
 - Python, 4-space indentation, and PEP 8 conventions.
-- Step modules are snake_case and must export `run(...)` (see `steps/*/*.py`).
-- Pipeline names follow `<domain>__<primary_source>__<client?>` (see `README.md`).
-- Input names should be `<source>__<logical_input>` and referenced consistently in `pipeline.yaml`.
+- Step handlers are snake_case modules that export `run(ctx, **kwargs)` and may define `declared_inputs` / `declared_outputs`.
+- Keep framework modules focused by layer (`core`, `runtime`, `io`, `observability`).
+- Pipeline and input naming conventions are documented in `README.md`.
 
 ## Testing Guidelines
-- No test suite is present in this repository.
-- If adding tests, place them under `tests/` and use `pytest`-style names (`test_*.py`).
+- Use `pytest`; tests are already present under `tests/`.
+- Add new tests as `tests/test_*.py`.
+- Prefer unit tests for core validation/loader logic and integration tests for local runner behavior.
 
 ## Commit & Pull Request Guidelines
-- Git history is not available in this checkout, so no commit message convention is documented.
 - Keep commits small and imperative (e.g., “Add cytric leg split reshape step”).
-- PRs should include a short summary, pipeline/step files touched, and any sample input/output or schema changes.
+- PRs should include a short summary, modules touched, behavior changes, and test coverage updates.
 
 ## Data & Configuration Notes
 - Do not commit raw client data; use anonymized samples.
-- S3 path and pipeline/input naming conventions are documented in `README.md`.
+- Example input/output fixtures should stay small and reviewable.
+- Runtime notes and MVP scope are tracked in `README.md` and `TASKS.md`.

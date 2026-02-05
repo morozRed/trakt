@@ -1,4 +1,4 @@
-# Trakt ETL Framework
+# ⚙️ Trakt ETL Framework
 
 Trakt is a lightweight, YAML-first ETL framework for tabular pipelines.
 
@@ -25,36 +25,11 @@ Optional extras:
 python -m pip install -e ".[dev,excel]"
 ```
 
-## Use Trakt From Another Project
+## Usage
 
-If your project lives elsewhere, install this framework in editable mode:
+### YAML pipeline definition
 
-```bash
-python -m pip install -e /path/to/trakt
-```
-
-Then in your project code:
-
-```python
-from trakt import load_pipeline_from_yaml
-from trakt.runtime.local_runner import LocalRunner
-```
-
-## Step Contract
-
-Step modules must export `run(ctx, **kwargs)` and can declare bindings:
-
-```python
-def run(ctx, input, output):
-    frame = input.copy()
-    frame["amount"] = frame["amount"] * 2
-    return {"output": frame}
-
-run.declared_inputs = ["input"]
-run.declared_outputs = ["output"]
-```
-
-## Pipeline YAML
+Define your pipeline in YAML:
 
 ```yaml
 name: multi_file_demo
@@ -77,7 +52,19 @@ outputs:
       from: records_norm
 ```
 
-## Run Locally
+Step modules must export `run(ctx, **kwargs)` and can declare bindings:
+
+```python
+def run(ctx, input, output):
+    frame = input.copy()
+    frame["amount"] = frame["amount"] * 2
+    return {"output": frame}
+
+run.declared_inputs = ["input"]
+run.declared_outputs = ["output"]
+```
+
+### Run from CLI (YAML-first)
 
 You can run by explicit YAML path:
 
@@ -112,6 +99,28 @@ python -m trakt.run_local \
   --input-dir /path/to/input \
   --output-dir /path/to/output \
   --manifest-path /path/to/output/custom-manifest.json
+```
+
+### Run from Python API
+
+If your project lives elsewhere, install this framework in editable mode:
+
+```bash
+python -m pip install -e /path/to/trakt
+```
+
+Then execute a pipeline programmatically:
+
+```python
+from trakt import load_pipeline_from_yaml
+from trakt.runtime.local_runner import LocalRunner
+
+pipeline = load_pipeline_from_yaml("pipelines/my_pipeline/pipeline.yaml")
+runner = LocalRunner(input_dir="data/input", output_dir="data/output")
+result = runner.run(pipeline, run_id="local-dev")
+
+print(result["status"])
+print(result["manifest_path"])
 ```
 
 ## Run Included Example
