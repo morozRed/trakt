@@ -206,6 +206,10 @@ def _iter_csv_chunks(
 
 
 def _write_csv_stream(data: Any, uri: str, **write_options: Any) -> None:
+    if "mode" in write_options:
+        raise ValueError(
+            "CSV stream mode does not allow write_options.mode; Trakt controls chunk write mode."
+        )
     if hasattr(data, "to_csv"):
         raise TypeError(
             "CSV stream writing expects an iterable of chunks, not a single DataFrame."

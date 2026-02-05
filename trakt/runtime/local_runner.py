@@ -177,6 +177,13 @@ def _expand_one_spec(
         return _filter_supported_paths(candidate.iterdir(), expected_suffix=expected_suffix)
 
     if candidate.exists():
+        if expected_suffix:
+            normalized_suffix = expected_suffix.lower()
+            if candidate.suffix.lower() != normalized_suffix:
+                raise ValueError(
+                    f"Input spec '{spec}' does not match expected file extension "
+                    f"'{expected_suffix}'."
+                )
         return [candidate]
 
     return []

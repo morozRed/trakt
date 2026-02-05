@@ -131,12 +131,12 @@ def run(ctx, input):
 ```
 
 CSV delimiter auto-detection is available via `metadata.delimiter: auto`
-or explicit `metadata.read_options`:
+or explicit `metadata.read_options`. CSV inputs must be `.csv` files:
 
 ```yaml
 inputs:
   source__records:
-    uri: records.psv
+    uri: records.csv
     metadata:
       delimiter: auto
       read_options:

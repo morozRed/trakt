@@ -145,3 +145,65 @@ def test_stream_mode_rejects_non_concat_multi_file_inputs(tmp_path, monkeypatch)
 
     with pytest.raises(ValueError, match="combine_strategy='concat'"):
         runner.run(pipeline, run_id="stream-non-concat")
+
+
+def test_stream_mode_rejects_write_options_mode(tmp_path, monkeypatch) -> None:
+    (tmp_path / "steps" / "normalize").mkdir(parents=True)
+    (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "pass_through.py").write_text(
+        textwrap.dedent(
+            """
+            def run(ctx, input):
+                return {"output": input}
+
+            run.declared_inputs = ["input"]
+            run.declared_outputs = ["output"]
+            run.supports_batch = False
+            run.supports_stream = True
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    (input_dir / "records").mkdir(parents=True)
+    (input_dir / "records" / "part1.csv").write_text("id,amount\n1,10\n", encoding="utf-8")
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: stream_write_options_mode
+            execution:
+              mode: stream
+            inputs:
+              source__records:
+                uri: records/*.csv
+                combine_strategy: concat
+            steps:
+              - id: normalize
+                uses: steps.normalize.pass_through
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+                  metadata:
+                    write_options:
+                      mode: a
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file)
+    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir, stream_chunk_size=1)
+    with pytest.raises(ValueError, match="write_options.mode"):
+        runner.run(pipeline, run_id="stream-write-options-mode")

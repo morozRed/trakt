@@ -154,6 +154,8 @@ spec = step("enrich", run=enrich).bind(
 
 ## 3) CSV Adapter Semantics
 
+The CSV adapter only loads files with the `.csv` extension. Non-`.csv` inputs are rejected.
+
 ### Read options
 
 You can provide CSV read options either as direct metadata keys or grouped under `read_options`.
@@ -176,7 +178,7 @@ Example:
 ```yaml
 inputs:
   source__records:
-    uri: records.psv
+    uri: records.csv
     metadata:
       delimiter: auto
       read_options:
@@ -284,7 +286,7 @@ execution:
 
 inputs:
   source__records:
-    uri: records/*.psv
+    uri: records/*.csv
     combine_strategy: concat
     metadata:
       delimiter: auto

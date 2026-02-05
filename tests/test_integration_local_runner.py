@@ -1,6 +1,8 @@
 import json
 import textwrap
 
+import pytest
+
 from trakt.core.loader import load_pipeline_from_yaml
 from trakt.runtime.local_runner import LocalRunner
 
@@ -222,7 +224,7 @@ def test_local_runner_csv_delimiter_autodetect(tmp_path, monkeypatch) -> None:
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    (input_dir / "records.psv").write_text("id|amount\n1|10\n2|20\n", encoding="utf-8")
+    (input_dir / "records.csv").write_text("id|amount\n1|10\n2|20\n", encoding="utf-8")
 
     pipeline_file = tmp_path / "pipeline.yaml"
     pipeline_file.write_text(
@@ -231,7 +233,7 @@ def test_local_runner_csv_delimiter_autodetect(tmp_path, monkeypatch) -> None:
             name: delimiter_auto_demo
             inputs:
               source__records:
-                uri: records.psv
+                uri: records.csv
                 metadata:
                   delimiter: auto
             steps:
@@ -282,7 +284,7 @@ def test_local_runner_csv_read_options_block_is_supported(tmp_path, monkeypatch)
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    (input_dir / "records.psv").write_text("id|amount\n1|10\n2|20\n", encoding="utf-8")
+    (input_dir / "records.csv").write_text("id|amount\n1|10\n2|20\n", encoding="utf-8")
 
     pipeline_file = tmp_path / "pipeline.yaml"
     pipeline_file.write_text(
@@ -291,7 +293,7 @@ def test_local_runner_csv_read_options_block_is_supported(tmp_path, monkeypatch)
             name: read_options_demo
             inputs:
               source__records:
-                uri: records.psv
+                uri: records.csv
                 metadata:
                   read_options:
                     delimiter: "|"
@@ -319,3 +321,57 @@ def test_local_runner_csv_read_options_block_is_supported(tmp_path, monkeypatch)
     final_text = (output_dir / "final.csv").read_text(encoding="utf-8")
     assert "1,10" in final_text
     assert "2,20" in final_text
+
+
+def test_local_runner_rejects_non_csv_input_files(tmp_path, monkeypatch) -> None:
+    (tmp_path / "steps" / "normalize").mkdir(parents=True)
+    (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "copy.py").write_text(
+        textwrap.dedent(
+            """
+            def run(ctx, input):
+                return {"output": input}
+
+            run.declared_inputs = ["input"]
+            run.declared_outputs = ["output"]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.psv").write_text("id|amount\n1|10\n", encoding="utf-8")
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: non_csv_demo
+            inputs:
+              source__records:
+                uri: records.psv
+            steps:
+              - id: copy
+                uses: steps.normalize.copy
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file)
+    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir)
+    with pytest.raises(ValueError, match="expected file extension"):
+        runner.run(pipeline, run_id="non-csv-run")
