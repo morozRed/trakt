@@ -14,7 +14,14 @@ from trakt.core.policies import (
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, Step, StepBindingError
-from trakt.core.workflow import WorkflowBuilder, WorkflowStep, step, workflow
+from trakt.core.workflow import (
+    WorkflowArtifact,
+    WorkflowBuilder,
+    WorkflowStep,
+    artifact,
+    step,
+    workflow,
+)
 
 __all__ = [
     "Artifact",
@@ -22,6 +29,7 @@ __all__ = [
     "Context",
     "DedupePolicy",
     "JoinPolicy",
+    "WorkflowArtifact",
     "Pipeline",
     "PipelineLoadError",
     "PipelineValidationError",
@@ -32,6 +40,7 @@ __all__ = [
     "StepRegistry",
     "WorkflowBuilder",
     "WorkflowStep",
+    "artifact",
     "apply_dedupe_policy",
     "combine_artifact_frames",
     "apply_join_policy",

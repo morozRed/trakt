@@ -180,7 +180,7 @@ print(result["manifest_path"])
 Or define the workflow directly in Python:
 
 ```python
-from trakt import step, workflow
+from trakt import artifact, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -193,20 +193,38 @@ def double_amount(ctx, input, output):
 double_amount.declared_inputs = ["input"]
 double_amount.declared_outputs = ["output"]
 
+source_records = artifact("source__records").as_kind("csv").at("records.csv")
+double_step = (
+    step("double_amount", run=double_amount)
+    .bind_input("source__records")
+    .bind_output("records_norm")
+)
+
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
 result = (
     workflow("python_workflow")
-    .input("source__records", uri="records.csv")
-    .steps(
-        [
-            step("double_amount", run=double_amount).bind(
-                input="source__records",
-                output="records_norm",
-            )
-        ]
-    )
+    .source(source_records)
+    .steps([double_step])
     .output("final", from_="records_norm")
     .run(runner, run_id="py-dev")
+)
+```
+
+Multiple inputs for one step:
+
+```python
+def join_inputs(ctx, inputs, output):
+    left, right = inputs
+    return {"output": left.merge(right, on="id", how="left")}
+
+
+join_inputs.declared_inputs = ["inputs"]
+join_inputs.declared_outputs = ["output"]
+
+join_step = (
+    step("join_inputs", run=join_inputs)
+    .bind_inputs("source__records", "source__countries")
+    .bind_output("records_joined")
 )
 ```
 

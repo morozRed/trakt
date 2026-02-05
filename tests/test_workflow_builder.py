@@ -1,7 +1,8 @@
 import pytest
 
+from trakt.core.artifacts import Artifact
 from trakt.core.registry import StepRegistry
-from trakt.core.workflow import WorkflowBuilder, step, workflow
+from trakt.core.workflow import artifact, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -14,13 +15,12 @@ def test_workflow_builder_builds_pipeline_from_step_specs() -> None:
     normalize.supports_stream = True
 
     pipeline = (
-        WorkflowBuilder(name="workflow_demo", execution_mode="stream")
-        .input("source__records", uri="records.csv")
+        workflow("workflow_demo", execution_mode="stream")
+        .source(artifact("source__records").at("records.csv"))
         .step(
-            step("normalize", run=normalize).bind(
-                input="source__records",
-                output="records_norm",
-            )
+            step("normalize", run=normalize)
+            .bind_input("source__records")
+            .bind_output("records_norm")
         )
         .output("final", from_="records_norm")
         .build()
@@ -45,17 +45,15 @@ def test_workflow_builder_steps_method_appends_multiple_steps() -> None:
 
     pipeline = (
         workflow("workflow_steps")
-        .input("source__records", uri="records.csv")
+        .source(artifact("source__records").at("records.csv"))
         .steps(
             [
-                step("normalize", run=normalize).bind(
-                    input="source__records",
-                    output="records_norm",
-                ),
-                step("enrich", run=enrich).bind(
-                    input="records_norm",
-                    output="records_enriched",
-                ),
+                step("normalize", run=normalize)
+                .bind_input("source__records")
+                .bind_output("records_norm"),
+                step("enrich", run=enrich)
+                .bind_input("records_norm")
+                .bind_output("records_enriched"),
             ]
         )
         .output("final", from_="records_enriched")
@@ -77,7 +75,7 @@ def test_workflow_builder_resolves_registry_alias() -> None:
 
     pipeline = (
         workflow("workflow_alias", registry=registry)
-        .input("source__records", uri="records.csv")
+        .source(artifact("source__records").at("records.csv"))
         .step(
             step("normalize", uses="normalize.alias").bind(
                 source="source__records",
@@ -90,6 +88,53 @@ def test_workflow_builder_resolves_registry_alias() -> None:
 
     assert pipeline.steps[0].uses == "normalize.alias"
     assert pipeline.steps[0].inputs == ["source__records"]
+
+
+def test_workflow_builder_supports_multiple_workflow_inputs(tmp_path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.csv").write_text("id,amount\n1,10\n2,20\n", encoding="utf-8")
+    (input_dir / "countries.csv").write_text("id,country\n1,US\n2,DE\n", encoding="utf-8")
+
+    def join_inputs(ctx, inputs, output):
+        records, countries = inputs
+        joined = records.merge(countries, on="id", how="left")
+        return {"output": joined}
+
+    join_inputs.declared_inputs = ["inputs"]
+    join_inputs.declared_outputs = ["output"]
+
+    result = (
+        workflow("workflow_multi_input")
+        .sources(
+            [
+                artifact("source__records").at("records.csv"),
+                artifact("source__countries").at("countries.csv"),
+            ]
+        )
+        .step(
+            step("join_inputs", run=join_inputs)
+            .bind_inputs("source__records", "source__countries")
+            .bind_output("records_joined")
+        )
+        .output("final", from_="records_joined")
+        .run(LocalRunner(input_dir=input_dir, output_dir=output_dir), run_id="multi-input")
+    )
+
+    assert result["status"] == "success"
+    output_text = (output_dir / "final.csv").read_text(encoding="utf-8")
+    assert "US" in output_text
+    assert "DE" in output_text
+
+
+def test_workflow_builder_accepts_core_artifact_objects() -> None:
+    pipeline = (
+        workflow("artifact_object")
+        .source(Artifact(name="source__records", kind="csv", uri="records.csv"))
+        .build()
+    )
+    assert "source__records" in pipeline.inputs
 
 
 def test_workflow_builder_rejects_non_step_argument() -> None:
@@ -114,13 +159,12 @@ def test_workflow_builder_run_executes_with_local_runner(tmp_path) -> None:
     runner = LocalRunner(input_dir=input_dir, output_dir=output_dir)
     result = (
         workflow("workflow_run")
-        .input("source__records", uri="records.csv")
+        .source(artifact("source__records").at("records.csv"))
         .steps(
             [
-                step("double_amount", run=double_amount).bind(
-                    input="source__records",
-                    output="records_norm",
-                )
+                step("double_amount", run=double_amount)
+                .bind_input("source__records")
+                .bind_output("records_norm")
             ]
         )
         .output("final", from_="records_norm")

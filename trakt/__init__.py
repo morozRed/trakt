@@ -14,7 +14,14 @@ from trakt.core.policies import (
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, Step, StepBindingError
-from trakt.core.workflow import WorkflowBuilder, WorkflowStep, step, workflow
+from trakt.core.workflow import (
+    WorkflowArtifact,
+    WorkflowBuilder,
+    WorkflowStep,
+    artifact,
+    step,
+    workflow,
+)
 from trakt.io.adapters import ArtifactAdapter, ArtifactAdapterRegistry, CsvArtifactAdapter
 from trakt.runtime.glue_runner import GlueRunner
 from trakt.runtime.lambda_runner import LambdaRunner
@@ -30,6 +37,7 @@ __all__ = [
     "DedupePolicy",
     "CsvArtifactAdapter",
     "JoinPolicy",
+    "WorkflowArtifact",
     "Pipeline",
     "PipelineLoadError",
     "PipelineValidationError",
@@ -44,6 +52,7 @@ __all__ = [
     "StepRegistry",
     "WorkflowBuilder",
     "WorkflowStep",
+    "artifact",
     "apply_dedupe_policy",
     "apply_join_policy",
     "apply_rename_policy",

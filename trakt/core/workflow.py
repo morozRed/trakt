@@ -12,6 +12,48 @@ StepHandler = Callable[..., dict[str, Any]]
 
 
 @dataclass(slots=True)
+class WorkflowArtifact:
+    """Reusable artifact specification for Python-defined workflows."""
+
+    name: str
+    kind: str = "csv"
+    uri: str | None = None
+    schema: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    combine_strategy: str = "concat"
+
+    def as_kind(self, kind: str) -> Self:
+        self.kind = kind
+        return self
+
+    def at(self, uri: str) -> Self:
+        self.uri = uri
+        return self
+
+    def combine(self, strategy: str) -> Self:
+        self.combine_strategy = strategy
+        return self
+
+    def with_schema(self, schema: dict[str, Any] | None) -> Self:
+        self.schema = schema
+        return self
+
+    def meta(self, **metadata: Any) -> Self:
+        self.metadata.update(metadata)
+        return self
+
+    def to_artifact(self) -> Artifact:
+        return Artifact(
+            name=self.name,
+            kind=self.kind,
+            uri=self.uri or self.name,
+            schema=self.schema,
+            metadata=dict(self.metadata),
+            combine_strategy=self.combine_strategy,
+        )
+
+
+@dataclass(slots=True)
 class WorkflowStep:
     """Reusable step specification for Python-defined workflows."""
 
@@ -28,7 +70,31 @@ class WorkflowStep:
 
     def bind(self, **bindings: Any) -> Self:
         """Set step bindings and return this step."""
-        self.bindings = dict(bindings)
+        self.bindings.update(bindings)
+        return self
+
+    def bind_input(self, artifact_name: str, *, param: str = "input") -> Self:
+        self.bindings[param] = artifact_name
+        return self
+
+    def bind_inputs(self, *artifact_names: str, param: str = "inputs") -> Self:
+        if not artifact_names:
+            raise ValueError(
+                f"Workflow step '{self.step_id}' bind_inputs requires at least one input."
+            )
+        self.bindings[param] = list(artifact_names)
+        return self
+
+    def bind_output(self, artifact_name: str, *, param: str = "output") -> Self:
+        self.bindings[param] = artifact_name
+        return self
+
+    def bind_outputs(self, *artifact_names: str, param: str = "outputs") -> Self:
+        if not artifact_names:
+            raise ValueError(
+                f"Workflow step '{self.step_id}' bind_outputs requires at least one output."
+            )
+        self.bindings[param] = list(artifact_names)
         return self
 
 
@@ -43,6 +109,18 @@ class WorkflowBuilder:
     _steps: list[WorkflowStep] = field(default_factory=list)
     _outputs: dict[str, str] = field(default_factory=dict)
 
+    def source(self, spec: WorkflowArtifact | Artifact) -> Self:
+        """Register one input artifact."""
+        resolved = _coerce_artifact(spec)
+        self._inputs[resolved.name] = resolved
+        return self
+
+    def sources(self, specs: list[WorkflowArtifact | Artifact]) -> Self:
+        """Register multiple input artifacts."""
+        for spec in specs:
+            self.source(spec)
+        return self
+
     def input(
         self,
         name: str,
@@ -53,15 +131,17 @@ class WorkflowBuilder:
         metadata: dict[str, Any] | None = None,
         combine_strategy: str = "concat",
     ) -> Self:
-        self._inputs[name] = Artifact(
-            name=name,
-            kind=kind,
-            uri=uri or name,
-            schema=schema,
-            metadata=dict(metadata or {}),
-            combine_strategy=combine_strategy,
+        """Convenience helper for adding one input artifact."""
+        return self.source(
+            artifact(
+                name,
+                kind=kind,
+                uri=uri,
+                schema=schema,
+                metadata=metadata,
+                combine_strategy=combine_strategy,
+            )
         )
-        return self
 
     def step(self, spec: WorkflowStep) -> Self:
         """Append one pre-defined workflow step."""
@@ -139,6 +219,26 @@ class WorkflowBuilder:
         return handler, spec.uses
 
 
+def artifact(
+    name: str,
+    *,
+    kind: str = "csv",
+    uri: str | None = None,
+    schema: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    combine_strategy: str = "concat",
+) -> WorkflowArtifact:
+    """Create a reusable workflow artifact specification."""
+    return WorkflowArtifact(
+        name=name,
+        kind=kind,
+        uri=uri,
+        schema=schema,
+        metadata=dict(metadata or {}),
+        combine_strategy=combine_strategy,
+    )
+
+
 def step(
     step_id: str,
     *,
@@ -157,6 +257,14 @@ def workflow(
 ) -> WorkflowBuilder:
     """Convenience factory for the WorkflowBuilder API."""
     return WorkflowBuilder(name=name, execution_mode=execution_mode, registry=registry)
+
+
+def _coerce_artifact(spec: WorkflowArtifact | Artifact) -> Artifact:
+    if isinstance(spec, WorkflowArtifact):
+        return spec.to_artifact()
+    if isinstance(spec, Artifact):
+        return spec
+    raise TypeError("WorkflowBuilder.source(...) expects WorkflowArtifact or Artifact.")
 
 
 def _callable_name(handler: StepHandler) -> str:
