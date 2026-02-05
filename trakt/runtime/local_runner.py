@@ -2,13 +2,12 @@
 
 from glob import glob
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
-from trakt.core.artifacts import Artifact, combine_artifact_frames
 from trakt.core.context import Context
 from trakt.core.pipeline import Pipeline
-from trakt.io.csv_reader import read_csv
-from trakt.io.csv_writer import write_csv
+from trakt.io.adapters import ArtifactAdapterRegistry
 from trakt.runtime.runner_base import RunnerBase
 
 
@@ -21,10 +20,16 @@ class LocalRunner(RunnerBase):
         input_dir: str | Path | None = None,
         output_dir: str | Path | None = None,
         input_overrides: dict[str, str] | None = None,
+        adapter_registry: ArtifactAdapterRegistry | None = None,
+        output_kind: str = "csv",
     ) -> None:
         self.input_dir = Path(input_dir or ".")
         self.output_dir = Path(output_dir or "outputs")
         self.input_overrides = dict(input_overrides or {})
+        self.adapter_registry = (
+            adapter_registry or ArtifactAdapterRegistry.from_entry_points()
+        )
+        self.output_kind = output_kind
 
     def load_inputs(
         self, pipeline: Pipeline, ctx: Context, **kwargs: Any
@@ -36,29 +41,30 @@ class LocalRunner(RunnerBase):
         loaded: dict[str, Any] = {}
         input_stats: dict[str, dict[str, Any]] = {}
         for input_name, artifact in pipeline.inputs.items():
+            adapter = self.adapter_registry.resolve(artifact.kind)
             source = overrides.get(input_name, artifact.uri)
-            paths = _resolve_input_paths(source, base_dir=input_dir)
+            paths = _resolve_input_paths(
+                source,
+                base_dir=input_dir,
+                expected_suffix=adapter.file_extension,
+            )
             if not paths:
                 raise FileNotFoundError(
                     f"No input files found for '{input_name}' using source '{source}'."
                 )
 
-            read_options = _csv_read_options(artifact)
-            frames = [read_csv(str(path), **read_options) for path in paths]
-            loaded[input_name] = (
-                frames[0]
-                if len(frames) == 1
-                else combine_artifact_frames(frames, artifact.combine_strategy)
-            )
+            loaded[input_name] = adapter.read_many(paths, artifact=artifact)
             input_stats[input_name] = {
                 "source": source,
                 "files_read": len(paths),
+                "kind": artifact.kind,
             }
             ctx.emit_event(
                 "input.loaded",
                 input_name=input_name,
                 file_count=len(paths),
                 combine_strategy=artifact.combine_strategy.value,
+                artifact_kind=artifact.kind,
             )
         ctx.add_metadata("input_stats", input_stats)
         return loaded
@@ -68,6 +74,9 @@ class LocalRunner(RunnerBase):
     ) -> dict[str, Any]:
         output_dir = Path(kwargs.get("output_dir", self.output_dir))
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_kind = kwargs.get("output_kind", self.output_kind)
+        output_adapter = self.adapter_registry.resolve(output_kind)
+        output_suffix = output_adapter.file_extension or ""
 
         persisted: dict[str, Any] = {}
         for output_name, source_name in pipeline.outputs.items():
@@ -76,44 +85,37 @@ class LocalRunner(RunnerBase):
                     f"Pipeline output '{output_name}' references unknown artifact '{source_name}'."
                 )
 
-            target_path = output_dir / f"{output_name}.csv"
+            target_path = output_dir / f"{output_name}{output_suffix}"
             data = artifacts[source_name]
-            write_csv(data, str(target_path))
+            output_adapter.write(data, str(target_path), artifact_name=output_name)
             persisted[output_name] = {
                 "path": str(target_path),
                 "rows": _count_rows(data),
+                "kind": output_kind,
             }
             ctx.emit_event(
                 "output.written",
                 output_name=output_name,
                 source_name=source_name,
                 path=str(target_path),
+                artifact_kind=output_kind,
             )
         return persisted
 
 
-def _csv_read_options(artifact: Artifact) -> dict[str, Any]:
-    supported_keys = {
-        "delimiter",
-        "encoding",
-        "header",
-        "date_columns",
-        "decimal",
-    }
-    return {
-        key: value
-        for key, value in artifact.metadata.items()
-        if key in supported_keys and value is not None
-    }
-
-
-def _resolve_input_paths(source: str, base_dir: Path) -> list[Path]:
+def _resolve_input_paths(
+    source: str, base_dir: Path, expected_suffix: str | None = None
+) -> list[Path]:
     raw_specs = _split_source_specs(source)
     resolved: list[Path] = []
     seen: set[Path] = set()
 
     for raw_spec in raw_specs:
-        paths = _expand_one_spec(raw_spec, base_dir=base_dir)
+        paths = _expand_one_spec(
+            raw_spec,
+            base_dir=base_dir,
+            expected_suffix=expected_suffix,
+        )
         for path in paths:
             normalized = path.resolve()
             if normalized in seen:
@@ -128,17 +130,19 @@ def _split_source_specs(source: str) -> list[str]:
     return [part for part in parts if part]
 
 
-def _expand_one_spec(spec: str, *, base_dir: Path) -> list[Path]:
+def _expand_one_spec(
+    spec: str, *, base_dir: Path, expected_suffix: str | None
+) -> list[Path]:
     path = Path(spec)
     candidate = path if path.is_absolute() else base_dir / path
     spec_str = str(candidate)
 
     if _has_glob_token(spec):
         matches = [Path(match) for match in glob(spec_str, recursive=True)]
-        return sorted(matches)
+        return _filter_supported_paths(matches, expected_suffix=expected_suffix)
 
     if candidate.is_dir():
-        return sorted(item for item in candidate.iterdir() if item.suffix.lower() == ".csv")
+        return _filter_supported_paths(candidate.iterdir(), expected_suffix=expected_suffix)
 
     if candidate.exists():
         return [candidate]
@@ -148,6 +152,20 @@ def _expand_one_spec(spec: str, *, base_dir: Path) -> list[Path]:
 
 def _has_glob_token(text: str) -> bool:
     return any(token in text for token in ("*", "?", "["))
+
+
+def _filter_supported_paths(
+    paths: Iterable[Path], *, expected_suffix: str | None
+) -> list[Path]:
+    if not expected_suffix:
+        return sorted(path for path in paths if path.is_file())
+
+    normalized_suffix = expected_suffix.lower()
+    return sorted(
+        path
+        for path in paths
+        if path.is_file() and path.suffix.lower() == normalized_suffix
+    )
 
 
 def _count_rows(payload: Any) -> int | None:

@@ -6,13 +6,17 @@ from trakt.core.loader import PipelineLoadError, load_pipeline_from_yaml
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, Step, StepBindingError
+from trakt.io.adapters import ArtifactAdapter, ArtifactAdapterRegistry, CsvArtifactAdapter
 from trakt.runtime.local_runner import LocalRunner
 from trakt.runtime.runner_base import RunnerBase
 
 __all__ = [
+    "ArtifactAdapter",
+    "ArtifactAdapterRegistry",
     "Artifact",
     "CombineStrategy",
     "Context",
+    "CsvArtifactAdapter",
     "Pipeline",
     "PipelineLoadError",
     "PipelineValidationError",
