@@ -96,6 +96,10 @@ class WorkflowStep:
             )
         return self
 
+    def input(self, **bindings: Any) -> Self:
+        """Alias for in_(...) to avoid keyword-style naming in user code."""
+        return self.in_(**bindings)
+
     def params(self, **bindings: Any) -> Self:
         """Bind literal config values without requiring const(...) wrappers."""
         for key, value in bindings.items():
@@ -111,6 +115,10 @@ class WorkflowStep:
                 binding_key=key,
             )
         return self
+
+    def output(self, **bindings: Any) -> Self:
+        """Alias for out(...) with a more explicit name."""
+        return self.out(**bindings)
 
     def bind_input(
         self,

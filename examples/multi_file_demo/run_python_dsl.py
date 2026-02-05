@@ -12,8 +12,8 @@ def build_workflow():
     source_records = artifact("source__records").at("records/*.csv").combine("concat")
     normalize_step = (
         step("double_amount", run=double_amount)
-        .in_(records=source_records)
-        .out(normalized=ref("records_norm"))
+        .input(records=source_records)
+        .output(normalized=ref("records_norm"))
     )
     return (
         workflow("multi_file_demo")

@@ -154,9 +154,9 @@ def test_workflow_step_bind_normalizes_artifact_values() -> None:
 def test_workflow_step_helpers_separate_refs_from_params() -> None:
     spec = (
         step("normalize", uses="normalize.alias")
-        .in_(input=ref("source__records"), lookup=artifact("source__lookup"))
+        .input(input=ref("source__records"), lookup=artifact("source__lookup"))
         .params(currency="usd", multiplier=2, options={"mode": "strict"})
-        .out(output=ref("records_norm"))
+        .output(output=ref("records_norm"))
     )
 
     assert spec.bindings["input"] == "source__records"
@@ -171,6 +171,20 @@ def test_workflow_step_helpers_separate_refs_from_params() -> None:
 def test_workflow_step_in_helper_rejects_literal_numbers() -> None:
     with pytest.raises(TypeError, match="Use .params"):
         step("normalize", uses="normalize.alias").in_(input=123)  # type: ignore[arg-type]
+
+
+def test_workflow_step_input_output_aliases_match_existing_helpers() -> None:
+    source = artifact("source__records")
+    spec = (
+        step("normalize", uses="normalize.alias")
+        .input(input=source)
+        .params(currency="usd")
+        .output(output=ref("records_norm"))
+    )
+
+    assert spec.bindings["input"] == "source__records"
+    assert get_const_binding_value(spec.bindings["currency"]) == "usd"
+    assert spec.bindings["output"] == "records_norm"
 
 
 def test_ref_helper_accepts_artifact_values() -> None:
@@ -279,9 +293,9 @@ def test_workflow_builder_params_helper_wraps_literal_strings(tmp_path) -> None:
         .source(artifact("source__records").at("records.csv"))
         .step(
             step("add_currency", run=add_currency)
-            .in_(input=ref("source__records"))
+            .input(input=ref("source__records"))
             .params(currency="usd")
-            .out(output=ref("records_norm"))
+            .output(output=ref("records_norm"))
         )
         .output("final", from_="records_norm")
         .run(runner, run_id="workflow-params")

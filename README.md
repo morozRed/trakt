@@ -287,8 +287,8 @@ double_amount.declared_outputs = ["output"]
 source_records = artifact("source__records").as_kind("csv").at("records.csv")
 double_step = (
     step("double_amount", run=double_amount)
-    .in_(input=ref("source__records"))
-    .out(output=ref("records_norm"))
+    .input(input=ref("source__records"))
+    .output(output=ref("records_norm"))
 )
 
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
@@ -302,15 +302,17 @@ result = (
 ```
 
 Preferred Python DSL pattern:
-- `.in_(...)` for artifact references
+- `.input(...)` for artifact references
 - `.params(...)` for literal config values
-- `.out(...)` for output artifact bindings
+- `.output(...)` for output artifact bindings
 
 Example with literal strings (no `const(...)` required):
 
 ```python
-step("normalize", run=double_amount).in_(input=ref("source__records")).params(currency="usd").out(output=ref("records_norm"))
+step("normalize", run=double_amount).input(input=ref("source__records")).params(currency="usd").output(output=ref("records_norm"))
 ```
+
+`in_(...)` / `out(...)` remain available as shorter aliases.
 
 Built-in quality gate step:
 

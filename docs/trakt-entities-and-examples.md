@@ -176,16 +176,17 @@ from trakt import ref, step
 
 spec = (
     step("enrich", run=enrich)
-    .in_(input=ref("source__records"))
+    .input(input=ref("source__records"))
     .params(currency="usd")
-    .out(output=ref("records_enriched"))
+    .output(output=ref("records_enriched"))
 )
 ```
 
 Python DSL recommendation:
-- use `.in_(...)` for artifact references
+- use `.input(...)` for artifact references
 - use `.params(...)` for literal config values
-- use `.out(...)` for output artifact bindings
+- use `.output(...)` for output artifact bindings
+- `.in_(...)` / `.out(...)` remain available as aliases
 
 When loading YAML, you can enable strict key validation:
 
@@ -420,9 +421,9 @@ result = (
     .source(artifact("source__records").at("records.csv"))
     .step(
         step("normalize", run=normalize)
-        .in_(input=ref("source__records"))
+        .input(input=ref("source__records"))
         .params(currency="usd")
-        .out(output=ref("records_norm"))
+        .output(output=ref("records_norm"))
     )
     .output(
         "final",
