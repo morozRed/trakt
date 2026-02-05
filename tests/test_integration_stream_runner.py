@@ -2,7 +2,7 @@ import textwrap
 
 import pytest
 
-from trakt.core.loader import load_pipeline_from_yaml
+from trakt.core.loader import PipelineLoadError, load_pipeline_from_yaml
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -33,7 +33,6 @@ def test_local_runner_executes_stream_pipeline(tmp_path, monkeypatch) -> None:
     monkeypatch.syspath_prepend(str(tmp_path))
 
     input_dir = tmp_path / "input"
-    output_dir = tmp_path / "output"
     (input_dir / "records").mkdir(parents=True)
     (input_dir / "records" / "part1.csv").write_text(
         "id,amount\n1,10\n2,30\n",
@@ -140,11 +139,8 @@ def test_stream_mode_rejects_non_concat_multi_file_inputs(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    pipeline = load_pipeline_from_yaml(pipeline_file)
-    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir, stream_chunk_size=1)
-
-    with pytest.raises(ValueError, match="combine_strategy='concat'"):
-        runner.run(pipeline, run_id="stream-non-concat")
+    with pytest.raises(PipelineLoadError, match="combine_strategy"):
+        load_pipeline_from_yaml(pipeline_file)
 
 
 def test_stream_mode_rejects_write_options_mode(tmp_path, monkeypatch) -> None:

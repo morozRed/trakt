@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from trakt.core.artifacts import Artifact, OutputDataset
+from trakt.core.artifacts import Artifact, CombineStrategy, OutputDataset
 from trakt.core.steps import Step
 
 
@@ -14,6 +14,7 @@ class PipelineValidationError(ValueError):
         *,
         invalid_execution_mode: str | None = None,
         incompatible_steps: list[tuple[str, str]] | None = None,
+        incompatible_inputs: list[tuple[str, str]] | None = None,
         missing_inputs: list[tuple[str, str]] | None = None,
         unused_inputs: list[str] | None = None,
         output_collisions: list[tuple[str, str, str]] | None = None,
@@ -21,6 +22,7 @@ class PipelineValidationError(ValueError):
     ) -> None:
         self.invalid_execution_mode = invalid_execution_mode
         self.incompatible_steps = incompatible_steps or []
+        self.incompatible_inputs = incompatible_inputs or []
         self.missing_inputs = missing_inputs or []
         self.unused_inputs = unused_inputs or []
         self.output_collisions = output_collisions or []
@@ -35,6 +37,14 @@ class PipelineValidationError(ValueError):
                 + ", ".join(
                     f"{step_id}:{mode}"
                     for step_id, mode in self.incompatible_steps
+                )
+            )
+        if self.incompatible_inputs:
+            details.append(
+                "mode incompatible inputs="
+                + ", ".join(
+                    f"{input_name}:{reason}"
+                    for input_name, reason in self.incompatible_inputs
                 )
             )
         if self.missing_inputs:
@@ -91,8 +101,22 @@ class Pipeline:
         used_pipeline_inputs: set[str] = set()
 
         incompatible_steps: list[tuple[str, str]] = []
+        incompatible_inputs: list[tuple[str, str]] = []
         missing_inputs: list[tuple[str, str]] = []
         output_collisions: list[tuple[str, str, str]] = []
+
+        if mode == "stream":
+            for input_name, artifact in self.inputs.items():
+                if (
+                    artifact.kind.strip().lower() == "csv"
+                    and artifact.combine_strategy is not CombineStrategy.CONCAT
+                ):
+                    incompatible_inputs.append(
+                        (
+                            input_name,
+                            f"combine_strategy={artifact.combine_strategy.value}",
+                        )
+                    )
 
         for step in self.steps:
             if mode == "batch" and not step.supports_batch:
@@ -129,6 +153,7 @@ class Pipeline:
         if (
             invalid_execution_mode
             or incompatible_steps
+            or incompatible_inputs
             or missing_inputs
             or unused_inputs
             or output_collisions
@@ -137,6 +162,7 @@ class Pipeline:
             raise PipelineValidationError(
                 invalid_execution_mode=invalid_execution_mode,
                 incompatible_steps=incompatible_steps,
+                incompatible_inputs=incompatible_inputs,
                 missing_inputs=missing_inputs,
                 unused_inputs=unused_inputs,
                 output_collisions=output_collisions,

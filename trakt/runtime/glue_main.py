@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from trakt.core.loader import load_pipeline_from_yaml
+from trakt.core.overrides import apply_const_overrides, parse_param_overrides
 from trakt.runtime.glue_runner import GlueRunner
 
 
@@ -60,6 +61,13 @@ def main(argv: list[str] | None = None) -> None:
         help="Override a pipeline input artifact source.",
     )
     parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="STEP.PARAM=VALUE",
+        help="Override a const binding (value parsed as YAML).",
+    )
+    parser.add_argument(
         "--run-id",
         default=None,
         help="Optional explicit run identifier.",
@@ -89,7 +97,9 @@ def main(argv: list[str] | None = None) -> None:
 
     pipeline_file = _resolve_pipeline_file(args.pipeline, args.pipeline_file)
     overrides = _parse_input_overrides(args.input)
+    param_overrides = parse_param_overrides(args.param)
     pipeline = load_pipeline_from_yaml(pipeline_file)
+    apply_const_overrides(pipeline, param_overrides)
 
     runner = GlueRunner(
         input_dir=args.input_dir,

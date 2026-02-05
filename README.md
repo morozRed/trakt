@@ -61,6 +61,13 @@ outputs:
           delimiter: "|"
 ```
 
+`combine_strategy` applies when an input resolves to multiple files (globs or directories):
+- `concat` (default): concatenates files in order; requires identical columns
+- `validate_schema`: requires identical columns and dtypes before concatenating
+- `union_by_name`: unions columns by name, filling missing values
+
+In `stream` execution, only `combine_strategy: concat` is currently supported.
+
 You can optionally set pipeline execution mode:
 
 ```yaml
@@ -99,7 +106,9 @@ steps:
 `outputs.datasets` supports per-output `kind`, `uri`, and `metadata`.
 When omitted, runner-level defaults are used.
 
-For stream mode, mark steps as stream-capable and return chunk iterators:
+When `execution.mode: stream` is set, input bindings receive an iterator of
+DataFrame chunks (CSV only) instead of a single DataFrame. For stream mode,
+mark steps as stream-capable and return chunk iterators:
 
 ```python
 def run(ctx, input):
@@ -169,6 +178,19 @@ python -m trakt.run_local \
   --output-dir /path/to/output \
   --input source__records=/tmp/records.csv
 ```
+
+Override const bindings:
+
+```bash
+python -m trakt.run_local \
+  --pipeline-file /path/to/pipeline.yaml \
+  --input-dir /path/to/input \
+  --output-dir /path/to/output \
+  --param normalize.currency=usd \
+  --param normalize.multiplier=2
+```
+
+Param values are parsed as YAML; quote values to force strings.
 
 Override manifest destination:
 

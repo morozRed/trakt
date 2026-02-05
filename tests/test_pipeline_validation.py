@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from trakt.core.artifacts import OutputDataset
+from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.pipeline import Pipeline, PipelineValidationError
 from trakt.core.steps import Step
 
@@ -91,6 +91,37 @@ def test_pipeline_validation_accepts_stream_capable_step() -> None:
     )
 
     pipeline.validate()
+
+
+def test_pipeline_validation_rejects_stream_non_concat_inputs() -> None:
+    pipeline = Pipeline(
+        name="stream_non_concat_inputs",
+        execution_mode="stream",
+        inputs={
+            "source__records": Artifact(
+                name="source__records",
+                kind="csv",
+                uri="records/*.csv",
+                combine_strategy="union_by_name",
+            )
+        },
+        steps=[
+            DummyStep(
+                id="s1",
+                inputs=["source__records"],
+                outputs=["records"],
+                supports_batch=False,
+                supports_stream=True,
+            )
+        ],
+        outputs={"dataset": "records"},
+    )
+    with pytest.raises(PipelineValidationError) as exc_info:
+        pipeline.validate()
+
+    assert exc_info.value.incompatible_inputs == [
+        ("source__records", "combine_strategy=union_by_name")
+    ]
 
 
 def test_pipeline_validation_supports_output_dataset_objects() -> None:

@@ -16,6 +16,35 @@ Fields:
 - `metadata`: adapter-specific options (CSV read options, required flag, etc.)
 - `schema`: optional schema payload
 
+`combine_strategy` applies only when `uri` resolves to multiple files:
+- `concat`: concatenates files in order; requires identical columns
+- `validate_schema`: requires identical columns and dtypes before concatenating
+- `union_by_name`: unions columns by name, filling missing values
+
+In `stream` execution mode, only `combine_strategy: concat` is currently supported.
+
+`schema` is optional and is validated during input load (and per chunk in stream
+mode). Supported shapes:
+- list of column names
+- mapping of `column_name: dtype_string`
+- mapping with `columns: [...]` and optional `dtypes: {column: dtype}`
+
+Schema validation is enforced by the CSV adapter; custom adapters may define
+their own validation behavior.
+
+Example:
+
+```yaml
+inputs:
+  source__records:
+    uri: records.csv
+    schema:
+      columns: [id, amount]
+      dtypes:
+        id: int64
+        amount: float64
+```
+
 YAML example:
 
 ```yaml
@@ -210,6 +239,35 @@ outputs:
         write_options:
           delimiter: "|"
 ```
+
+### Stream execution (CSV v1)
+
+To read artifacts as a stream, set the pipeline execution mode to `stream`.
+Stream-capable steps receive iterators of DataFrame chunks and should return
+iterators of chunks.
+
+YAML:
+
+```yaml
+execution:
+  mode: stream
+```
+
+Python step:
+
+```python
+def run(ctx, input):
+    for chunk in input:
+        frame = chunk.copy()
+        frame["amount"] = frame["amount"] * 2
+        yield frame
+
+run.declared_inputs = ["input"]
+run.declared_outputs = ["output"]
+run.supports_stream = True
+```
+
+Tune chunk size with `--stream-chunk-size` (CSV adapters only).
 
 ## 4) Step Metrics Contract
 

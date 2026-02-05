@@ -8,7 +8,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from trakt.core.artifacts import Artifact, combine_artifact_frames
+from trakt.core.artifacts import (
+    Artifact,
+    combine_artifact_frames,
+    validate_artifact_schema,
+)
 from trakt.io.csv_reader import read_csv
 from trakt.io.csv_writer import write_csv
 
@@ -66,9 +70,19 @@ class CsvArtifactAdapter(ArtifactAdapter):
                 paths,
                 read_options=read_options,
                 chunk_size=chunk_size or 50_000,
+                schema=artifact.schema,
+                artifact_name=artifact.name,
             )
 
         frames = [read_csv(str(path), **read_options) for path in paths]
+        if artifact.schema is not None:
+            for path, frame in zip(paths, frames):
+                validate_artifact_schema(
+                    frame,
+                    artifact.schema,
+                    artifact_name=artifact.name,
+                    source=str(path),
+                )
         return (
             frames[0]
             if len(frames) == 1
@@ -194,7 +208,12 @@ def _csv_write_options(artifact: Artifact | None) -> dict[str, Any]:
 
 
 def _iter_csv_chunks(
-    paths: list[Path], *, read_options: dict[str, Any], chunk_size: int
+    paths: list[Path],
+    *,
+    read_options: dict[str, Any],
+    chunk_size: int,
+    schema: Any | None = None,
+    artifact_name: str | None = None,
 ) -> Iterator[Any]:
     if chunk_size <= 0:
         raise ValueError("Stream chunk_size must be a positive integer.")
@@ -202,6 +221,13 @@ def _iter_csv_chunks(
     for path in paths:
         chunk_iter = read_csv(str(path), chunksize=chunk_size, **read_options)
         for chunk in chunk_iter:
+            if schema is not None:
+                validate_artifact_schema(
+                    chunk,
+                    schema,
+                    artifact_name=artifact_name,
+                    source=str(path),
+                )
             yield chunk
 
 
