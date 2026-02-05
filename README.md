@@ -103,6 +103,12 @@ steps:
       output: records_norm
 ```
 
+Binding cheat sheet (`with:`):
+- bare string (`source__records`) => artifact reference
+- `const: "usd"` => literal string
+- numbers/bools/null => literal values
+- lists/maps are recursive (any bare string inside is still an artifact ref)
+
 `outputs.datasets` supports per-output `kind`, `uri`, and `metadata`.
 When omitted, runner-level defaults are used.
 
@@ -186,6 +192,7 @@ python -m trakt.run_local \
   --pipeline-file /path/to/pipeline.yaml \
   --input-dir /path/to/input \
   --output-dir /path/to/output \
+  --strict-keys \
   --param normalize.currency=usd \
   --param normalize.multiplier=2
 ```
@@ -247,13 +254,19 @@ Then execute a pipeline programmatically:
 from trakt import load_pipeline_from_yaml
 from trakt.runtime.local_runner import LocalRunner
 
-pipeline = load_pipeline_from_yaml("pipelines/my_pipeline/pipeline.yaml")
+pipeline = load_pipeline_from_yaml(
+    "pipelines/my_pipeline/pipeline.yaml",
+    strict_unknown_keys=True,
+)
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
 result = runner.run(pipeline, run_id="local-dev")
 
 print(result["status"])
 print(result["manifest_path"])
 ```
+
+`strict_unknown_keys=True` (or CLI `--strict-keys`) enables fail-fast validation
+for unknown fields in input/step/output definitions.
 
 Or define the workflow directly in Python:
 

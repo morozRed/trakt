@@ -282,3 +282,129 @@ def test_loader_parses_per_output_dataset_config(tmp_path) -> None:
     assert output.kind == "csv"
     assert output.uri == "exports/final_pipe.csv"
     assert output.metadata["delimiter"] == "|"
+
+
+def test_loader_strict_mode_rejects_unknown_input_fields(tmp_path) -> None:
+    _build_direct_module()
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: strict_unknown_input
+            inputs:
+              source__records:
+                uri: records.csv
+                combnie_strategy: concat
+            steps:
+              - id: normalize
+                uses: steps.normalize.demo
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineLoadError, match="unknown fields: combnie_strategy"):
+        load_pipeline_from_yaml(pipeline_file, strict_unknown_keys=True)
+
+
+def test_loader_strict_mode_rejects_unknown_step_fields(tmp_path) -> None:
+    _build_direct_module()
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: strict_unknown_step
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: steps.normalize.demo
+                with:
+                  input: source__records
+                  output: records_norm
+                timeout_ms: 10
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineLoadError, match="unknown fields: timeout_ms"):
+        load_pipeline_from_yaml(pipeline_file, strict_unknown_keys=True)
+
+
+def test_loader_strict_mode_rejects_unknown_output_dataset_fields(tmp_path) -> None:
+    _build_direct_module()
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: strict_unknown_output
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: steps.normalize.demo
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+                  delimeter: "|"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineLoadError, match="unknown fields: delimeter"):
+        load_pipeline_from_yaml(pipeline_file, strict_unknown_keys=True)
+
+
+def test_loader_non_strict_mode_preserves_unknown_output_fields_as_metadata(
+    tmp_path,
+) -> None:
+    _build_direct_module()
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: non_strict_unknown_output
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: steps.normalize.demo
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+                  delimeter: "|"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file, strict_unknown_keys=False)
+    assert pipeline.outputs["final"].metadata["delimeter"] == "|"

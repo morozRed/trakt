@@ -181,6 +181,17 @@ spec = step("enrich", run=enrich).bind(
 )
 ```
 
+When loading YAML, you can enable strict key validation:
+
+```python
+from trakt import load_pipeline_from_yaml
+
+pipeline = load_pipeline_from_yaml("pipeline.yaml", strict_unknown_keys=True)
+```
+
+Strict mode raises on unknown fields in input/step/output definitions instead of
+silently keeping them in metadata.
+
 ## 3) CSV Adapter Semantics
 
 The CSV adapter only loads files with the `.csv` extension. Non-`.csv` inputs are rejected.

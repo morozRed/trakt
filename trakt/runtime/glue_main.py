@@ -68,6 +68,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Override a const binding (value parsed as YAML).",
     )
     parser.add_argument(
+        "--strict-keys",
+        action="store_true",
+        help="Fail fast on unknown keys in input/step/output definitions.",
+    )
+    parser.add_argument(
         "--run-id",
         default=None,
         help="Optional explicit run identifier.",
@@ -98,7 +103,10 @@ def main(argv: list[str] | None = None) -> None:
     pipeline_file = _resolve_pipeline_file(args.pipeline, args.pipeline_file)
     overrides = _parse_input_overrides(args.input)
     param_overrides = parse_param_overrides(args.param)
-    pipeline = load_pipeline_from_yaml(pipeline_file)
+    pipeline = load_pipeline_from_yaml(
+        pipeline_file,
+        strict_unknown_keys=args.strict_keys,
+    )
     apply_const_overrides(pipeline, param_overrides)
 
     runner = GlueRunner(

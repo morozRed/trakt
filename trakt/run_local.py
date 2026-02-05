@@ -33,6 +33,11 @@ def main() -> None:
         metavar="STEP.PARAM=VALUE",
         help="Override a const binding (value parsed as YAML).",
     )
+    parser.add_argument(
+        "--strict-keys",
+        action="store_true",
+        help="Fail fast on unknown keys in input/step/output definitions.",
+    )
     parser.add_argument("--run-id", default=None, help="Optional explicit run id")
     parser.add_argument(
         "--pipeline-version",
@@ -71,7 +76,10 @@ def main() -> None:
     overrides = _parse_input_overrides(args.input)
     param_overrides = parse_param_overrides(args.param)
 
-    pipeline = load_pipeline_from_yaml(pipeline_file)
+    pipeline = load_pipeline_from_yaml(
+        pipeline_file,
+        strict_unknown_keys=args.strict_keys,
+    )
     apply_const_overrides(pipeline, param_overrides)
     runner = LocalRunner(
         input_dir=args.input_dir,

@@ -384,6 +384,9 @@ def _count_rows(payload: Any) -> int | None:
     if payload is None:
         return None
 
+    if isinstance(payload, (str, bytes)):
+        return None
+
     if isinstance(payload, Mapping):
         row_counts = [_count_rows(value) for value in payload.values()]
         counts = [count for count in row_counts if count is not None]

@@ -71,6 +71,7 @@ def test_local_runner_executes_stream_pipeline(tmp_path, monkeypatch) -> None:
     )
 
     pipeline = load_pipeline_from_yaml(pipeline_file)
+    output_dir = tmp_path / "output"
     runner = LocalRunner(
         input_dir=input_dir,
         output_dir=output_dir,

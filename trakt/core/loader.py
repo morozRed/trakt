@@ -16,7 +16,10 @@ class PipelineLoadError(ValueError):
 
 
 def load_pipeline_from_yaml(
-    pipeline_file: str | Path, registry: StepRegistry | None = None
+    pipeline_file: str | Path,
+    registry: StepRegistry | None = None,
+    *,
+    strict_unknown_keys: bool = False,
 ) -> Pipeline:
     """Build and validate a pipeline from a YAML definition file."""
     path = Path(pipeline_file)
@@ -29,9 +32,19 @@ def load_pipeline_from_yaml(
     step_registry = registry or StepRegistry.from_entry_points()
     name = str(payload.get("name") or path.parent.name or path.stem)
     execution_mode = _parse_execution_mode(payload)
-    inputs = _parse_inputs(payload.get("inputs", {}))
-    steps = _parse_steps(payload.get("steps", []), registry=step_registry)
-    outputs = _parse_outputs(payload.get("outputs", {}))
+    inputs = _parse_inputs(
+        payload.get("inputs", {}),
+        strict_unknown_keys=strict_unknown_keys,
+    )
+    steps = _parse_steps(
+        payload.get("steps", []),
+        registry=step_registry,
+        strict_unknown_keys=strict_unknown_keys,
+    )
+    outputs = _parse_outputs(
+        payload.get("outputs", {}),
+        strict_unknown_keys=strict_unknown_keys,
+    )
 
     pipeline = Pipeline(
         name=name,
@@ -61,7 +74,11 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data or {}
 
 
-def _parse_inputs(raw_inputs: Any) -> dict[str, Artifact]:
+def _parse_inputs(
+    raw_inputs: Any,
+    *,
+    strict_unknown_keys: bool,
+) -> dict[str, Artifact]:
     if raw_inputs is None:
         return {}
     if not isinstance(raw_inputs, dict):
@@ -69,11 +86,20 @@ def _parse_inputs(raw_inputs: Any) -> dict[str, Artifact]:
 
     parsed: dict[str, Artifact] = {}
     for name, definition in raw_inputs.items():
-        parsed[name] = _parse_input_definition(name, definition)
+        parsed[name] = _parse_input_definition(
+            name,
+            definition,
+            strict_unknown_keys=strict_unknown_keys,
+        )
     return parsed
 
 
-def _parse_input_definition(name: str, definition: Any) -> Artifact:
+def _parse_input_definition(
+    name: str,
+    definition: Any,
+    *,
+    strict_unknown_keys: bool,
+) -> Artifact:
     if definition is None:
         definition = {}
 
@@ -84,13 +110,18 @@ def _parse_input_definition(name: str, definition: Any) -> Artifact:
         raise PipelineLoadError(f"Input '{name}' must be a mapping or string.")
 
     known_keys = {"kind", "uri", "schema", "metadata", "combine_strategy"}
+    unknown_keys = sorted(key for key in definition if key not in known_keys)
+    if strict_unknown_keys and unknown_keys:
+        raise PipelineLoadError(
+            f"Input '{name}' has unknown fields: {', '.join(unknown_keys)}."
+        )
     raw_metadata = definition.get("metadata") or {}
     if not isinstance(raw_metadata, dict):
         raise PipelineLoadError(f"Input '{name}' field 'metadata' must be a mapping.")
 
     metadata = dict(raw_metadata)
     for key, value in definition.items():
-        if key not in known_keys:
+        if key in unknown_keys:
             metadata[key] = value
 
     return Artifact(
@@ -103,7 +134,12 @@ def _parse_input_definition(name: str, definition: Any) -> Artifact:
     )
 
 
-def _parse_steps(raw_steps: Any, registry: StepRegistry) -> list[ResolvedStep]:
+def _parse_steps(
+    raw_steps: Any,
+    registry: StepRegistry,
+    *,
+    strict_unknown_keys: bool,
+) -> list[ResolvedStep]:
     if raw_steps is None:
         return []
     if not isinstance(raw_steps, list):
@@ -113,6 +149,14 @@ def _parse_steps(raw_steps: Any, registry: StepRegistry) -> list[ResolvedStep]:
     for index, definition in enumerate(raw_steps):
         if not isinstance(definition, dict):
             raise PipelineLoadError(f"Step #{index + 1} must be a mapping.")
+
+        if strict_unknown_keys:
+            known_keys = {"id", "uses", "with"}
+            unknown_keys = sorted(key for key in definition if key not in known_keys)
+            if unknown_keys:
+                raise PipelineLoadError(
+                    f"Step #{index + 1} has unknown fields: {', '.join(unknown_keys)}."
+                )
 
         step_id = definition.get("id")
         uses = definition.get("uses")
@@ -150,11 +194,24 @@ def _parse_steps(raw_steps: Any, registry: StepRegistry) -> list[ResolvedStep]:
     return parsed
 
 
-def _parse_outputs(raw_outputs: Any) -> dict[str, OutputDataset]:
+def _parse_outputs(
+    raw_outputs: Any,
+    *,
+    strict_unknown_keys: bool,
+) -> dict[str, OutputDataset]:
     if raw_outputs is None:
         return {}
 
     if isinstance(raw_outputs, dict) and "datasets" in raw_outputs:
+        if strict_unknown_keys:
+            unknown_keys = sorted(
+                key for key in raw_outputs if key != "datasets"
+            )
+            if unknown_keys:
+                raise PipelineLoadError(
+                    "Pipeline 'outputs' has unknown fields when using "
+                    f"'datasets': {', '.join(unknown_keys)}."
+                )
         datasets = raw_outputs.get("datasets")
         if not isinstance(datasets, list):
             raise PipelineLoadError("Pipeline 'outputs.datasets' must be a list.")
@@ -176,8 +233,15 @@ def _parse_outputs(raw_outputs: Any) -> dict[str, OutputDataset]:
                 )
             metadata = dict(metadata)
             known_keys = {"name", "from", "kind", "uri", "metadata"}
+            unknown_keys = sorted(key for key in dataset if key not in known_keys)
+            if strict_unknown_keys and unknown_keys:
+                raise PipelineLoadError(
+                    f"Output dataset '{name}' has unknown fields: "
+                    + ", ".join(unknown_keys)
+                    + "."
+                )
             for key, value in dataset.items():
-                if key not in known_keys:
+                if key in unknown_keys:
                     metadata[key] = value
             parsed[name] = OutputDataset(
                 name=name,
@@ -216,8 +280,17 @@ def _parse_outputs(raw_outputs: Any) -> dict[str, OutputDataset]:
                 )
             metadata = dict(metadata)
             known_keys = {"from", "kind", "uri", "metadata"}
+            unknown_keys = sorted(
+                key for key in source_definition if key not in known_keys
+            )
+            if strict_unknown_keys and unknown_keys:
+                raise PipelineLoadError(
+                    f"Output '{output_name}' has unknown fields: "
+                    + ", ".join(unknown_keys)
+                    + "."
+                )
             for key, value in source_definition.items():
-                if key not in known_keys:
+                if key in unknown_keys:
                     metadata[key] = value
             parsed_outputs[output_name] = OutputDataset(
                 name=output_name,

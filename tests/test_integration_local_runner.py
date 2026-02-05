@@ -323,6 +323,135 @@ def test_local_runner_csv_read_options_block_is_supported(tmp_path, monkeypatch)
     assert "2,20" in final_text
 
 
+def test_local_runner_csv_read_options_header_bool_false_is_supported(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "steps").mkdir(parents=True)
+    (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "copy.py").write_text(
+        textwrap.dedent(
+            """
+            def run(ctx, input):
+                return {"output": input}
+
+            run.declared_inputs = ["input"]
+            run.declared_outputs = ["output"]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.csv").write_text("1|10\n2|20\n", encoding="utf-8")
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: read_options_header_bool_demo
+            inputs:
+              source__records:
+                uri: records.csv
+                metadata:
+                  read_options:
+                    delimiter: "|"
+                    header: false
+            steps:
+              - id: copy
+                uses: steps.copy
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file)
+    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir)
+    result = runner.run(pipeline, run_id="read-options-header-bool-run")
+
+    assert result["status"] == "success"
+    final_lines = (output_dir / "final.csv").read_text(encoding="utf-8").splitlines()
+    assert final_lines[0] == "0,1"
+    assert "1,10" in final_lines
+    assert "2,20" in final_lines
+
+
+def test_local_runner_rows_in_ignores_const_string_bindings(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "steps" / "normalize").mkdir(parents=True)
+    (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "steps" / "normalize" / "scale_amount.py").write_text(
+        textwrap.dedent(
+            """
+            def run(ctx, input, currency):
+                frame = input.copy()
+                frame["currency"] = currency
+                return {"output": frame}
+
+            run.declared_inputs = ["input", "currency"]
+            run.declared_outputs = ["output"]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "records.csv").write_text("id,amount\n1,10\n2,30\n", encoding="utf-8")
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: rows_in_const_demo
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: scale
+                uses: steps.normalize.scale_amount
+                with:
+                  input: source__records
+                  currency:
+                    const: usd
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    pipeline = load_pipeline_from_yaml(pipeline_file)
+    runner = LocalRunner(input_dir=input_dir, output_dir=output_dir)
+    result = runner.run(pipeline, run_id="rows-in-const-run")
+
+    assert result["status"] == "success"
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    step_report = manifest["steps"][0]
+    assert step_report["rows_in"] == 2
+    assert step_report["rows_out"] == 2
+
+
 def test_local_runner_rejects_non_csv_input_files(tmp_path, monkeypatch) -> None:
     (tmp_path / "steps" / "normalize").mkdir(parents=True)
     (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")

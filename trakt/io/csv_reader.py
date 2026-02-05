@@ -51,9 +51,11 @@ def _normalize_date_columns(value: str | Sequence[str] | None) -> list[str] | No
     return [str(item) for item in value]
 
 
-def _normalize_header(value: int | str | None) -> int | None | str:
+def _normalize_header(value: int | str | bool | None) -> int | None | str:
     if value is None:
         return None
+    if isinstance(value, bool):
+        return "infer" if value else None
     if isinstance(value, int):
         return value
     normalized = value.strip().lower()
