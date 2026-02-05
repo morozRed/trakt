@@ -221,5 +221,5 @@ Each run writes:
 
 - OpenTelemetry spans are emitted when `otel_enabled=True` is passed to `runner.run(...)`.
 - Warning/coercion/missing-column events emitted via `ctx.emit_event(...)` are attached as span events.
-- Cloud runners (Glue/Lambda parity) are scaffolded but not implemented.
+- Glue/Lambda runners currently provide local parity wrappers (Lambda enforces `max_batch_rows`).
 - Planning checklist lives in `TASKS.md`.

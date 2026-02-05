@@ -16,6 +16,8 @@ from trakt.core.registry import StepRegistry
 from trakt.core.steps import ResolvedStep, Step, StepBindingError
 from trakt.core.workflow import WorkflowBuilder, workflow
 from trakt.io.adapters import ArtifactAdapter, ArtifactAdapterRegistry, CsvArtifactAdapter
+from trakt.runtime.glue_runner import GlueRunner
+from trakt.runtime.lambda_runner import LambdaRunner
 from trakt.runtime.local_runner import LocalRunner
 from trakt.runtime.runner_base import RunnerBase
 
@@ -32,6 +34,8 @@ __all__ = [
     "PipelineLoadError",
     "PipelineValidationError",
     "RenamePolicy",
+    "GlueRunner",
+    "LambdaRunner",
     "LocalRunner",
     "ResolvedStep",
     "RunnerBase",
