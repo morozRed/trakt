@@ -12,6 +12,7 @@ from trakt.core.context import Context
 from trakt.core.pipeline import Pipeline
 from trakt.core.steps import ResolvedStep, Step
 from trakt.observability.manifest import write_manifest
+from trakt.observability.otel import get_tracer
 
 
 class RunnerBase(ABC):
@@ -35,10 +36,15 @@ class RunnerBase(ABC):
             pipeline_version=pipeline_version,
             metadata=dict(context_metadata or {}),
         )
+        tracer = kwargs.get("tracer") or get_tracer(
+            enabled=kwargs.get("otel_enabled", False),
+            service_name=kwargs.get("otel_service_name", "trakt"),
+            tracer_name=kwargs.get("otel_tracer_name", "trakt.runner"),
+        )
+        ctx.add_metadata("tracer", tracer)
+        ctx.register_telemetry_hook(_otel_event_hook)
         ctx.add_metadata("runner", self.__class__.__name__)
         started_at = datetime.now(timezone.utc)
-        ctx.emit_event("pipeline.started")
-
         artifacts: dict[str, Any] = {}
         step_reports: list[dict[str, Any]] = []
         outputs: dict[str, Any] = {}
@@ -46,51 +52,68 @@ class RunnerBase(ABC):
         error: dict[str, Any] | None = None
         started = perf_counter()
 
-        try:
-            artifacts = self.load_inputs(pipeline, ctx, **kwargs)
-            for step in pipeline.steps:
-                step_report = self.execute_step(step, artifacts, ctx)
-                step_reports.append(step_report)
+        with tracer.start_as_current_span(
+            "pipeline.run",
+            attributes={
+                "pipeline.name": pipeline.name,
+                "pipeline.version": pipeline_version or "",
+                "pipeline.execution_mode": pipeline.execution_mode,
+                "run.id": ctx.run_id,
+            },
+        ) as pipeline_span:
+            ctx.add_metadata("pipeline_span", pipeline_span)
+            ctx.emit_event("pipeline.started")
 
-            outputs = self.write_outputs(pipeline, artifacts, ctx, **kwargs)
-            ctx.emit_event("pipeline.completed", output_count=len(outputs))
-            result = {
-                "run_id": ctx.run_id,
-                "pipeline": pipeline.name,
-                "outputs": outputs,
-                "steps": step_reports,
-                "status": "success",
-            }
-        except Exception as exc:
-            error = {"type": type(exc).__name__, "message": str(exc)}
-            ctx.emit_event(
-                "pipeline.failed",
-                error_type=error["type"],
-                error_message=error["message"],
-            )
-            raise
-        finally:
-            finished_at = datetime.now(timezone.utc)
-            duration_ms = round((perf_counter() - started) * 1000, 3)
-            manifest_payload = self._build_manifest_payload(
-                ctx=ctx,
-                step_reports=step_reports,
-                outputs=outputs,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=duration_ms,
-                error=error,
-            )
-            manifest_path = self.get_manifest_path(ctx=ctx, **kwargs)
             try:
-                write_manifest(str(manifest_path), manifest_payload)
-            except Exception:
-                if error is None:
-                    raise
-            else:
-                ctx.add_metadata("manifest_path", str(manifest_path))
-                if result is not None:
-                    result["manifest_path"] = str(manifest_path)
+                artifacts = self.load_inputs(pipeline, ctx, **kwargs)
+                for step in pipeline.steps:
+                    step_report = self.execute_step(step, artifacts, ctx)
+                    step_reports.append(step_report)
+
+                outputs = self.write_outputs(pipeline, artifacts, ctx, **kwargs)
+                ctx.emit_event("pipeline.completed", output_count=len(outputs))
+                result = {
+                    "run_id": ctx.run_id,
+                    "pipeline": pipeline.name,
+                    "outputs": outputs,
+                    "steps": step_reports,
+                    "status": "success",
+                }
+                _set_span_attribute(pipeline_span, "status", "success")
+            except Exception as exc:
+                error = {"type": type(exc).__name__, "message": str(exc)}
+                ctx.emit_event(
+                    "pipeline.failed",
+                    error_type=error["type"],
+                    error_message=error["message"],
+                )
+                _set_span_attribute(pipeline_span, "status", "failed")
+                _set_span_attribute(pipeline_span, "error.type", error["type"])
+                _set_span_attribute(pipeline_span, "error.message", error["message"])
+                raise
+            finally:
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = round((perf_counter() - started) * 1000, 3)
+                _set_span_attribute(pipeline_span, "duration.ms", duration_ms)
+                manifest_payload = self._build_manifest_payload(
+                    ctx=ctx,
+                    step_reports=step_reports,
+                    outputs=outputs,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+                manifest_path = self.get_manifest_path(ctx=ctx, **kwargs)
+                try:
+                    write_manifest(str(manifest_path), manifest_payload)
+                except Exception:
+                    if error is None:
+                        raise
+                else:
+                    ctx.add_metadata("manifest_path", str(manifest_path))
+                    if result is not None:
+                        result["manifest_path"] = str(manifest_path)
 
         if result is None:
             raise RuntimeError("Pipeline run finished without result.")
@@ -114,23 +137,40 @@ class RunnerBase(ABC):
         """Execute one step and merge named outputs into the artifact state."""
         step_kwargs = self._resolve_step_inputs(step, artifacts)
         rows_in = _count_rows(step_kwargs)
+        tracer = ctx.get_metadata("tracer") or get_tracer(enabled=False)
 
-        ctx.emit_event("step.started", step_id=step.id, rows_in=rows_in)
-        started = perf_counter()
-        raw_result = step.run(ctx, **step_kwargs)
-        duration_ms = round((perf_counter() - started) * 1000, 3)
+        with tracer.start_as_current_span(
+            f"step.{step.id}",
+            attributes={
+                "pipeline.name": ctx.pipeline_name,
+                "pipeline.version": ctx.pipeline_version or "",
+                "step.id": step.id,
+            },
+        ) as step_span:
+            ctx.add_metadata("active_span", step_span)
+            try:
+                ctx.emit_event("step.started", step_id=step.id, rows_in=rows_in)
+                started = perf_counter()
+                raw_result = step.run(ctx, **step_kwargs)
+                duration_ms = round((perf_counter() - started) * 1000, 3)
 
-        materialized = self._materialize_step_outputs(step, raw_result)
-        artifacts.update(materialized)
-        rows_out = _count_rows(materialized)
+                materialized = self._materialize_step_outputs(step, raw_result)
+                artifacts.update(materialized)
+                rows_out = _count_rows(materialized)
 
-        ctx.emit_event(
-            "step.completed",
-            step_id=step.id,
-            duration_ms=duration_ms,
-            rows_in=rows_in,
-            rows_out=rows_out,
-        )
+                _set_span_attribute(step_span, "rows.in", rows_in)
+                _set_span_attribute(step_span, "rows.out", rows_out)
+                _set_span_attribute(step_span, "duration.ms", duration_ms)
+
+                ctx.emit_event(
+                    "step.completed",
+                    step_id=step.id,
+                    duration_ms=duration_ms,
+                    rows_in=rows_in,
+                    rows_out=rows_out,
+                )
+            finally:
+                ctx.add_metadata("active_span", None)
         return {
             "step_id": step.id,
             "duration_ms": duration_ms,
@@ -331,3 +371,38 @@ def _count_rows(payload: Any) -> int | None:
         return len(payload)
     except TypeError:
         return None
+
+
+def _set_span_attribute(span: Any, key: str, value: Any) -> None:
+    if value is None:
+        return
+    span.set_attribute(key, value)
+
+
+def _otel_event_hook(event_name: str, attributes: dict[str, Any], ctx: Context) -> None:
+    if not _is_otel_event(event_name):
+        return
+
+    span = ctx.get_metadata("active_span") or ctx.get_metadata("pipeline_span")
+    if span is None:
+        return
+    span.add_event(event_name, attributes=_normalize_event_attributes(attributes))
+
+
+def _is_otel_event(event_name: str) -> bool:
+    normalized = event_name.lower().replace("-", "_")
+    return (
+        "warning" in normalized
+        or "coercion" in normalized
+        or "missing_column" in normalized
+    )
+
+
+def _normalize_event_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key, value in attributes.items():
+        if isinstance(value, (bool, int, float, str)):
+            normalized[key] = value
+            continue
+        normalized[key] = str(value)
+    return normalized

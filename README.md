@@ -219,7 +219,7 @@ Each run writes:
 
 ## Current Notes
 
-- OpenTelemetry integration is intentionally deferred for MVP.
-- OTEL exporter env vars are currently ignored (for example `OTEL_EXPORTER_OTLP_ENDPOINT`).
+- OpenTelemetry spans are emitted when `otel_enabled=True` is passed to `runner.run(...)`.
+- Warning/coercion/missing-column events emitted via `ctx.emit_event(...)` are attached as span events.
 - Cloud runners (Glue/Lambda parity) are scaffolded but not implemented.
 - Planning checklist lives in `TASKS.md`.

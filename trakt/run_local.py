@@ -38,6 +38,21 @@ def main() -> None:
         default=50_000,
         help="Chunk size for stream execution mode (CSV adapters only).",
     )
+    parser.add_argument(
+        "--otel-enabled",
+        action="store_true",
+        help="Enable OpenTelemetry spans for the pipeline run.",
+    )
+    parser.add_argument(
+        "--otel-service-name",
+        default="trakt",
+        help="OpenTelemetry service.name attribute.",
+    )
+    parser.add_argument(
+        "--otel-tracer-name",
+        default="trakt.runner",
+        help="OpenTelemetry tracer name.",
+    )
     args = parser.parse_args()
 
     pipeline_file = _resolve_pipeline_file(args.pipeline, args.pipeline_file)
@@ -55,6 +70,9 @@ def main() -> None:
         pipeline_version=args.pipeline_version,
         manifest_path=args.manifest_path,
         stream_chunk_size=args.stream_chunk_size,
+        otel_enabled=args.otel_enabled,
+        otel_service_name=args.otel_service_name,
+        otel_tracer_name=args.otel_tracer_name,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
