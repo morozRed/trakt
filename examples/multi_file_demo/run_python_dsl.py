@@ -4,15 +4,16 @@ import argparse
 import json
 
 from steps.normalize.double_amount import run as double_amount
-from trakt import artifact, step, workflow
+from trakt import artifact, ref, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
 def build_workflow():
     source_records = artifact("source__records").at("records/*.csv").combine("concat")
-    normalize_step = step("double_amount", run=double_amount).bind(
-        records=source_records,
-        normalized="records_norm",
+    normalize_step = (
+        step("double_amount", run=double_amount)
+        .in_(records=source_records)
+        .out(normalized=ref("records_norm"))
     )
     return (
         workflow("multi_file_demo")

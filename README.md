@@ -271,7 +271,7 @@ for unknown fields in input/step/output definitions.
 Or define the workflow directly in Python:
 
 ```python
-from trakt import artifact, const, step, workflow
+from trakt import artifact, ref, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -287,10 +287,8 @@ double_amount.declared_outputs = ["output"]
 source_records = artifact("source__records").as_kind("csv").at("records.csv")
 double_step = (
     step("double_amount", run=double_amount)
-    .bind(
-        input="source__records",
-        output="records_norm",
-    )
+    .in_(input=ref("source__records"))
+    .out(output=ref("records_norm"))
 )
 
 runner = LocalRunner(input_dir="data/input", output_dir="data/output")
@@ -303,10 +301,15 @@ result = (
 )
 ```
 
-Literal strings in DSL bindings should use `const(...)`:
+Preferred Python DSL pattern:
+- `.in_(...)` for artifact references
+- `.params(...)` for literal config values
+- `.out(...)` for output artifact bindings
+
+Example with literal strings (no `const(...)` required):
 
 ```python
-step("normalize", run=double_amount).bind(input="source__records", currency=const("usd"), output="records_norm")
+step("normalize", run=double_amount).in_(input=ref("source__records")).params(currency="usd").out(output=ref("records_norm"))
 ```
 
 Built-in quality gate step:

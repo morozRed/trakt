@@ -25,8 +25,10 @@ from trakt.core.steps import ResolvedStep, Step, StepBindingError
 from trakt.core.workflow import (
     WorkflowArtifact,
     WorkflowBuilder,
+    WorkflowRef,
     WorkflowStep,
     artifact,
+    ref,
     step,
     workflow,
 )
@@ -39,6 +41,7 @@ __all__ = [
     "Context",
     "DedupePolicy",
     "JoinPolicy",
+    "WorkflowRef",
     "WorkflowArtifact",
     "Pipeline",
     "PipelineLoadError",
@@ -58,6 +61,7 @@ __all__ = [
     "apply_rename_policy",
     "evaluate_quality_gates",
     "load_pipeline_from_yaml",
+    "ref",
     "step",
     "workflow",
     "const",

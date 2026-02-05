@@ -54,6 +54,13 @@ class WorkflowArtifact:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowRef:
+    """Explicit artifact reference for Python-defined workflows."""
+
+    name: str
+
+
 @dataclass(slots=True)
 class WorkflowStep:
     """Reusable step specification for Python-defined workflows."""
@@ -79,8 +86,37 @@ class WorkflowStep:
             )
         return self
 
+    def in_(self, **bindings: Any) -> Self:
+        """Bind step inputs to artifact references."""
+        for key, value in bindings.items():
+            self.bindings[key] = _normalize_ref_binding_value(
+                value,
+                step_id=self.step_id,
+                binding_key=key,
+            )
+        return self
+
+    def params(self, **bindings: Any) -> Self:
+        """Bind literal config values without requiring const(...) wrappers."""
+        for key, value in bindings.items():
+            self.bindings[key] = const(value)
+        return self
+
+    def out(self, **bindings: Any) -> Self:
+        """Bind step outputs to artifact references."""
+        for key, value in bindings.items():
+            self.bindings[key] = _normalize_ref_binding_value(
+                value,
+                step_id=self.step_id,
+                binding_key=key,
+            )
+        return self
+
     def bind_input(
-        self, artifact_ref: str | WorkflowArtifact | Artifact, *, param: str = "input"
+        self,
+        artifact_ref: str | WorkflowRef | WorkflowArtifact | Artifact,
+        *,
+        param: str = "input",
     ) -> Self:
         self.bindings[param] = _artifact_name(
             artifact_ref,
@@ -91,7 +127,7 @@ class WorkflowStep:
 
     def bind_inputs(
         self,
-        *artifact_refs: str | WorkflowArtifact | Artifact,
+        *artifact_refs: str | WorkflowRef | WorkflowArtifact | Artifact,
         param: str = "inputs",
     ) -> Self:
         if not artifact_refs:
@@ -105,7 +141,10 @@ class WorkflowStep:
         return self
 
     def bind_output(
-        self, artifact_ref: str | WorkflowArtifact | Artifact, *, param: str = "output"
+        self,
+        artifact_ref: str | WorkflowRef | WorkflowArtifact | Artifact,
+        *,
+        param: str = "output",
     ) -> Self:
         self.bindings[param] = _artifact_name(
             artifact_ref,
@@ -116,7 +155,7 @@ class WorkflowStep:
 
     def bind_outputs(
         self,
-        *artifact_refs: str | WorkflowArtifact | Artifact,
+        *artifact_refs: str | WorkflowRef | WorkflowArtifact | Artifact,
         param: str = "outputs",
     ) -> Self:
         if not artifact_refs:
@@ -305,6 +344,21 @@ def workflow(
     return WorkflowBuilder(name=name, execution_mode=execution_mode, registry=registry)
 
 
+def ref(
+    value: str | WorkflowRef | WorkflowArtifact | Artifact,
+) -> WorkflowRef:
+    """Create an explicit artifact reference for Python DSL bindings."""
+    if isinstance(value, WorkflowRef):
+        return value
+    if isinstance(value, str):
+        return WorkflowRef(name=value)
+    if isinstance(value, WorkflowArtifact):
+        return WorkflowRef(name=value.name)
+    if isinstance(value, Artifact):
+        return WorkflowRef(name=value.name)
+    raise TypeError("ref(...) expects str/WorkflowRef/WorkflowArtifact/Artifact.")
+
+
 def _coerce_artifact(spec: WorkflowArtifact | Artifact) -> Artifact:
     if isinstance(spec, WorkflowArtifact):
         return spec.to_artifact()
@@ -314,19 +368,58 @@ def _coerce_artifact(spec: WorkflowArtifact | Artifact) -> Artifact:
 
 
 def _artifact_name(
-    ref: str | WorkflowArtifact | Artifact,
+    ref: str | WorkflowRef | WorkflowArtifact | Artifact,
     *,
     step_id: str,
     binding_key: str,
 ) -> str:
     if isinstance(ref, str):
         return ref
+    if isinstance(ref, WorkflowRef):
+        return ref.name
     if isinstance(ref, WorkflowArtifact):
         return ref.name
     if isinstance(ref, Artifact):
         return ref.name
     raise TypeError(
-        f"Workflow step '{step_id}' binding '{binding_key}' expects str/WorkflowArtifact/Artifact."
+        f"Workflow step '{step_id}' binding '{binding_key}' expects "
+        "str/WorkflowRef/WorkflowArtifact/Artifact."
+    )
+
+
+def _normalize_ref_binding_value(value: Any, *, step_id: str, binding_key: str) -> Any:
+    if isinstance(value, (str, WorkflowRef, WorkflowArtifact, Artifact)):
+        return _artifact_name(value, step_id=step_id, binding_key=binding_key)
+    if isinstance(value, list):
+        return [
+            _normalize_ref_binding_value(
+                item,
+                step_id=step_id,
+                binding_key=binding_key,
+            )
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return [
+            _normalize_ref_binding_value(
+                item,
+                step_id=step_id,
+                binding_key=binding_key,
+            )
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_ref_binding_value(
+                item,
+                step_id=step_id,
+                binding_key=binding_key,
+            )
+            for key, item in value.items()
+        }
+    raise TypeError(
+        f"Workflow step '{step_id}' binding '{binding_key}' expects artifact "
+        "references (strings/artifacts/refs). Use .params(...) for literal values."
     )
 
 
@@ -335,6 +428,8 @@ def _normalize_binding_value(value: Any, *, step_id: str, binding_key: str) -> A
         return const(get_const_binding_value(value))
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
+    if isinstance(value, WorkflowRef):
+        return value.name
     if isinstance(value, (WorkflowArtifact, Artifact)):
         return _artifact_name(value, step_id=step_id, binding_key=binding_key)
     if isinstance(value, list):

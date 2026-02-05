@@ -172,14 +172,20 @@ steps:
 Python DSL:
 
 ```python
-from trakt import const, step
+from trakt import ref, step
 
-spec = step("enrich", run=enrich).bind(
-    input="source__records",
-    currency=const("usd"),
-    output="records_enriched",
+spec = (
+    step("enrich", run=enrich)
+    .in_(input=ref("source__records"))
+    .params(currency="usd")
+    .out(output=ref("records_enriched"))
 )
 ```
+
+Python DSL recommendation:
+- use `.in_(...)` for artifact references
+- use `.params(...)` for literal config values
+- use `.out(...)` for output artifact bindings
 
 When loading YAML, you can enable strict key validation:
 
@@ -394,7 +400,7 @@ outputs:
 ## 7) Python DSL Example
 
 ```python
-from trakt import artifact, const, step, workflow
+from trakt import artifact, ref, step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -413,11 +419,10 @@ result = (
     workflow("dsl_demo")
     .source(artifact("source__records").at("records.csv"))
     .step(
-        step("normalize", run=normalize).bind(
-            input="source__records",
-            currency=const("usd"),
-            output="records_norm",
-        )
+        step("normalize", run=normalize)
+        .in_(input=ref("source__records"))
+        .params(currency="usd")
+        .out(output=ref("records_norm"))
     )
     .output(
         "final",
@@ -448,5 +453,6 @@ result = (
 If you are upgrading existing pipelines:
 - remove output-name params from step handler signatures (they are no longer injected)
 - keep `declared_outputs` so result keys are still mapped correctly
-- wrap literal string configs with `const` (`{ const: ... }` in YAML, `const(...)` in DSL)
+- wrap literal string configs with `const` in YAML (`{ const: ... }`)
+- Python DSL can use `.params(...)` for literal configs; `const(...)` still works for legacy `.bind(...)`
 - optionally move output adapter config from runner defaults into per-output `outputs.datasets` entries
