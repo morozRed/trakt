@@ -1,0 +1,18 @@
+name: glue_smoke_demo
+
+inputs:
+  source__trips:
+    uri: trips/*.csv
+    combine_strategy: concat
+
+steps:
+  - id: normalize_amount
+    uses: steps.normalize.normalize_amount
+    with:
+      input: source__trips
+      output: trips_norm
+
+outputs:
+  datasets:
+    - name: smoke_result
+      from: trips_norm
