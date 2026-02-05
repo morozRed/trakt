@@ -213,6 +213,10 @@ result = (
 Multiple inputs for one step:
 
 ```python
+input_1 = artifact("source__records").at("records.csv")
+input_2 = artifact("source__countries").at("countries.csv")
+
+
 def join_inputs(ctx, inputs, output):
     left, right = inputs
     return {"output": left.merge(right, on="id", how="left")}
@@ -223,7 +227,7 @@ join_inputs.declared_outputs = ["output"]
 
 join_step = (
     step("join_inputs", run=join_inputs)
-    .bind_inputs("source__records", "source__countries")
+    .bind_inputs(input_1, input_2)
     .bind_output("records_joined")
 )
 ```

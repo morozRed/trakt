@@ -70,31 +70,62 @@ class WorkflowStep:
 
     def bind(self, **bindings: Any) -> Self:
         """Set step bindings and return this step."""
-        self.bindings.update(bindings)
+        for key, value in bindings.items():
+            self.bindings[key] = _normalize_binding_value(
+                value,
+                step_id=self.step_id,
+                binding_key=key,
+            )
         return self
 
-    def bind_input(self, artifact_name: str, *, param: str = "input") -> Self:
-        self.bindings[param] = artifact_name
+    def bind_input(
+        self, artifact_ref: str | WorkflowArtifact | Artifact, *, param: str = "input"
+    ) -> Self:
+        self.bindings[param] = _artifact_name(
+            artifact_ref,
+            step_id=self.step_id,
+            binding_key=param,
+        )
         return self
 
-    def bind_inputs(self, *artifact_names: str, param: str = "inputs") -> Self:
-        if not artifact_names:
+    def bind_inputs(
+        self,
+        *artifact_refs: str | WorkflowArtifact | Artifact,
+        param: str = "inputs",
+    ) -> Self:
+        if not artifact_refs:
             raise ValueError(
                 f"Workflow step '{self.step_id}' bind_inputs requires at least one input."
             )
-        self.bindings[param] = list(artifact_names)
+        self.bindings[param] = [
+            _artifact_name(artifact_ref, step_id=self.step_id, binding_key=param)
+            for artifact_ref in artifact_refs
+        ]
         return self
 
-    def bind_output(self, artifact_name: str, *, param: str = "output") -> Self:
-        self.bindings[param] = artifact_name
+    def bind_output(
+        self, artifact_ref: str | WorkflowArtifact | Artifact, *, param: str = "output"
+    ) -> Self:
+        self.bindings[param] = _artifact_name(
+            artifact_ref,
+            step_id=self.step_id,
+            binding_key=param,
+        )
         return self
 
-    def bind_outputs(self, *artifact_names: str, param: str = "outputs") -> Self:
-        if not artifact_names:
+    def bind_outputs(
+        self,
+        *artifact_refs: str | WorkflowArtifact | Artifact,
+        param: str = "outputs",
+    ) -> Self:
+        if not artifact_refs:
             raise ValueError(
                 f"Workflow step '{self.step_id}' bind_outputs requires at least one output."
             )
-        self.bindings[param] = list(artifact_names)
+        self.bindings[param] = [
+            _artifact_name(artifact_ref, step_id=self.step_id, binding_key=param)
+            for artifact_ref in artifact_refs
+        ]
         return self
 
 
@@ -265,6 +296,46 @@ def _coerce_artifact(spec: WorkflowArtifact | Artifact) -> Artifact:
     if isinstance(spec, Artifact):
         return spec
     raise TypeError("WorkflowBuilder.source(...) expects WorkflowArtifact or Artifact.")
+
+
+def _artifact_name(
+    ref: str | WorkflowArtifact | Artifact,
+    *,
+    step_id: str,
+    binding_key: str,
+) -> str:
+    if isinstance(ref, str):
+        return ref
+    if isinstance(ref, WorkflowArtifact):
+        return ref.name
+    if isinstance(ref, Artifact):
+        return ref.name
+    raise TypeError(
+        f"Workflow step '{step_id}' binding '{binding_key}' expects str/WorkflowArtifact/Artifact."
+    )
+
+
+def _normalize_binding_value(value: Any, *, step_id: str, binding_key: str) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (WorkflowArtifact, Artifact)):
+        return _artifact_name(value, step_id=step_id, binding_key=binding_key)
+    if isinstance(value, list):
+        return [
+            _normalize_binding_value(item, step_id=step_id, binding_key=binding_key)
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return [
+            _normalize_binding_value(item, step_id=step_id, binding_key=binding_key)
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_binding_value(item, step_id=step_id, binding_key=binding_key)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _callable_name(handler: StepHandler) -> str:

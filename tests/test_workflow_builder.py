@@ -19,7 +19,7 @@ def test_workflow_builder_builds_pipeline_from_step_specs() -> None:
         .source(artifact("source__records").at("records.csv"))
         .step(
             step("normalize", run=normalize)
-            .bind_input("source__records")
+            .bind_input(artifact("source__records").at("records.csv"))
             .bind_output("records_norm")
         )
         .output("final", from_="records_norm")
@@ -49,10 +49,10 @@ def test_workflow_builder_steps_method_appends_multiple_steps() -> None:
         .steps(
             [
                 step("normalize", run=normalize)
-                .bind_input("source__records")
+                .bind_input(artifact("source__records"))
                 .bind_output("records_norm"),
                 step("enrich", run=enrich)
-                .bind_input("records_norm")
+                .bind_input(artifact("records_norm"))
                 .bind_output("records_enriched"),
             ]
         )
@@ -105,17 +105,15 @@ def test_workflow_builder_supports_multiple_workflow_inputs(tmp_path) -> None:
     join_inputs.declared_inputs = ["inputs"]
     join_inputs.declared_outputs = ["output"]
 
+    input_1 = artifact("source__records").at("records.csv")
+    input_2 = artifact("source__countries").at("countries.csv")
+
     result = (
         workflow("workflow_multi_input")
-        .sources(
-            [
-                artifact("source__records").at("records.csv"),
-                artifact("source__countries").at("countries.csv"),
-            ]
-        )
+        .sources([input_1, input_2])
         .step(
             step("join_inputs", run=join_inputs)
-            .bind_inputs("source__records", "source__countries")
+            .bind_inputs(input_1, input_2)
             .bind_output("records_joined")
         )
         .output("final", from_="records_joined")
@@ -137,9 +135,29 @@ def test_workflow_builder_accepts_core_artifact_objects() -> None:
     assert "source__records" in pipeline.inputs
 
 
+def test_workflow_step_bind_normalizes_artifact_values() -> None:
+    input_1 = artifact("source__records").at("records.csv")
+    output_1 = Artifact(name="records_norm", kind="csv", uri="records_norm.csv")
+
+    spec = step("normalize", uses="normalize.alias").bind(
+        input=input_1,
+        output=output_1,
+        inputs=[input_1, "source__fallback"],
+    )
+
+    assert spec.bindings["input"] == "source__records"
+    assert spec.bindings["output"] == "records_norm"
+    assert spec.bindings["inputs"] == ["source__records", "source__fallback"]
+
+
 def test_workflow_builder_rejects_non_step_argument() -> None:
     with pytest.raises(TypeError, match="expects a WorkflowStep"):
         workflow("invalid").step("not-a-step")  # type: ignore[arg-type]
+
+
+def test_workflow_step_rejects_invalid_artifact_reference() -> None:
+    with pytest.raises(TypeError, match="expects str/WorkflowArtifact/Artifact"):
+        step("x", uses="normalize.alias").bind_input(123)  # type: ignore[arg-type]
 
 
 def test_workflow_builder_run_executes_with_local_runner(tmp_path) -> None:
