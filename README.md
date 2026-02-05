@@ -123,6 +123,36 @@ print(result["status"])
 print(result["manifest_path"])
 ```
 
+Or define the workflow directly in Python:
+
+```python
+from trakt import workflow
+from trakt.runtime.local_runner import LocalRunner
+
+
+def double_amount(ctx, input, output):
+    frame = input.copy()
+    frame["amount"] = frame["amount"] * 2
+    return {"output": frame}
+
+
+double_amount.declared_inputs = ["input"]
+double_amount.declared_outputs = ["output"]
+
+runner = LocalRunner(input_dir="data/input", output_dir="data/output")
+result = (
+    workflow("python_workflow")
+    .input("source__records", uri="records.csv")
+    .step(
+        "double_amount",
+        run=double_amount,
+        with_={"input": "source__records", "output": "records_norm"},
+    )
+    .output("final", from_="records_norm")
+    .run(runner, run_id="py-dev")
+)
+```
+
 ## Run Included Example
 
 ```bash
