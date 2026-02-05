@@ -9,6 +9,10 @@ Current MVP supports:
 - step resolution from module paths or alias registry
 - per-run `manifest.json` output
 
+If you want the full API/entity reference with examples, start with:
+- `docs/README.md`
+- `docs/trakt-entities-and-examples.md`
+
 ## Install (Local Development)
 
 From this repository:
