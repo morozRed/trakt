@@ -1,6 +1,7 @@
 """Artifact adapter registry and built-in adapter implementations."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from importlib import metadata
@@ -18,11 +19,25 @@ class ArtifactAdapter(ABC):
     file_extension = ""
 
     @abstractmethod
-    def read_many(self, paths: list[Path], *, artifact: Artifact) -> Any:
+    def read_many(
+        self,
+        paths: list[Path],
+        *,
+        artifact: Artifact,
+        execution_mode: str = "batch",
+        chunk_size: int | None = None,
+    ) -> Any:
         """Read one or more files and materialize an in-memory payload."""
 
     @abstractmethod
-    def write(self, data: Any, uri: str, *, artifact_name: str | None = None) -> None:
+    def write(
+        self,
+        data: Any,
+        uri: str,
+        *,
+        artifact_name: str | None = None,
+        execution_mode: str = "batch",
+    ) -> None:
         """Persist payload to the provided URI."""
 
 
@@ -31,8 +46,26 @@ class CsvArtifactAdapter(ArtifactAdapter):
 
     file_extension = ".csv"
 
-    def read_many(self, paths: list[Path], *, artifact: Artifact) -> Any:
+    def read_many(
+        self,
+        paths: list[Path],
+        *,
+        artifact: Artifact,
+        execution_mode: str = "batch",
+        chunk_size: int | None = None,
+    ) -> Any:
         read_options = _csv_read_options(artifact)
+        if execution_mode == "stream":
+            if artifact.combine_strategy.value != "concat":
+                raise ValueError(
+                    "CSV stream mode currently supports combine_strategy='concat' only."
+                )
+            return _iter_csv_chunks(
+                paths,
+                read_options=read_options,
+                chunk_size=chunk_size or 50_000,
+            )
+
         frames = [read_csv(str(path), **read_options) for path in paths]
         return (
             frames[0]
@@ -40,7 +73,17 @@ class CsvArtifactAdapter(ArtifactAdapter):
             else combine_artifact_frames(frames, artifact.combine_strategy)
         )
 
-    def write(self, data: Any, uri: str, *, artifact_name: str | None = None) -> None:
+    def write(
+        self,
+        data: Any,
+        uri: str,
+        *,
+        artifact_name: str | None = None,
+        execution_mode: str = "batch",
+    ) -> None:
+        if execution_mode == "stream":
+            _write_csv_stream(data, uri)
+            return
         write_csv(data, uri)
 
 
@@ -97,6 +140,45 @@ def _csv_read_options(artifact: Artifact) -> dict[str, Any]:
         for key, value in artifact.metadata.items()
         if key in supported_keys and value is not None
     }
+
+
+def _iter_csv_chunks(
+    paths: list[Path], *, read_options: dict[str, Any], chunk_size: int
+) -> Iterator[Any]:
+    if chunk_size <= 0:
+        raise ValueError("Stream chunk_size must be a positive integer.")
+
+    for path in paths:
+        chunk_iter = read_csv(str(path), chunksize=chunk_size, **read_options)
+        for chunk in chunk_iter:
+            yield chunk
+
+
+def _write_csv_stream(data: Any, uri: str) -> None:
+    if hasattr(data, "to_csv"):
+        raise TypeError(
+            "CSV stream writing expects an iterable of chunks, not a single DataFrame."
+        )
+
+    if not isinstance(data, Iterable) or isinstance(data, (str, bytes)):
+        raise TypeError(
+            "CSV stream writing expects an iterable of DataFrame-like chunks."
+        )
+
+    wrote_any_chunk = False
+    for chunk in data:
+        write_csv(
+            chunk,
+            uri,
+            header=not wrote_any_chunk,
+            mode="w" if not wrote_any_chunk else "a",
+        )
+        wrote_any_chunk = True
+
+    if not wrote_any_chunk:
+        # Persist an empty file so output contracts remain deterministic.
+        Path(uri).parent.mkdir(parents=True, exist_ok=True)
+        Path(uri).write_text("", encoding="utf-8")
 
 
 def _normalize_kind(kind: str) -> str:

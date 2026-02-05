@@ -22,6 +22,7 @@ class LocalRunner(RunnerBase):
         input_overrides: dict[str, str] | None = None,
         adapter_registry: ArtifactAdapterRegistry | None = None,
         output_kind: str = "csv",
+        stream_chunk_size: int = 50_000,
     ) -> None:
         self.input_dir = Path(input_dir or ".")
         self.output_dir = Path(output_dir or "outputs")
@@ -30,6 +31,7 @@ class LocalRunner(RunnerBase):
             adapter_registry or ArtifactAdapterRegistry.from_entry_points()
         )
         self.output_kind = output_kind
+        self.stream_chunk_size = stream_chunk_size
 
     def load_inputs(
         self, pipeline: Pipeline, ctx: Context, **kwargs: Any
@@ -53,7 +55,13 @@ class LocalRunner(RunnerBase):
                     f"No input files found for '{input_name}' using source '{source}'."
                 )
 
-            loaded[input_name] = adapter.read_many(paths, artifact=artifact)
+            chunk_size = kwargs.get("stream_chunk_size", self.stream_chunk_size)
+            loaded[input_name] = adapter.read_many(
+                paths,
+                artifact=artifact,
+                execution_mode=pipeline.execution_mode,
+                chunk_size=chunk_size,
+            )
             input_stats[input_name] = {
                 "source": source,
                 "files_read": len(paths),
@@ -65,6 +73,7 @@ class LocalRunner(RunnerBase):
                 file_count=len(paths),
                 combine_strategy=artifact.combine_strategy.value,
                 artifact_kind=artifact.kind,
+                execution_mode=pipeline.execution_mode,
             )
         ctx.add_metadata("input_stats", input_stats)
         return loaded
@@ -87,7 +96,12 @@ class LocalRunner(RunnerBase):
 
             target_path = output_dir / f"{output_name}{output_suffix}"
             data = artifacts[source_name]
-            output_adapter.write(data, str(target_path), artifact_name=output_name)
+            output_adapter.write(
+                data,
+                str(target_path),
+                artifact_name=output_name,
+                execution_mode=pipeline.execution_mode,
+            )
             persisted[output_name] = {
                 "path": str(target_path),
                 "rows": _count_rows(data),
@@ -99,6 +113,7 @@ class LocalRunner(RunnerBase):
                 source_name=source_name,
                 path=str(target_path),
                 artifact_kind=output_kind,
+                execution_mode=pipeline.execution_mode,
             )
         return persisted
 

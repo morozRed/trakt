@@ -52,6 +52,13 @@ outputs:
       from: records_norm
 ```
 
+You can optionally set pipeline execution mode:
+
+```yaml
+execution:
+  mode: stream  # batch (default) or stream
+```
+
 Step modules must export `run(ctx, **kwargs)` and can declare bindings:
 
 ```python
@@ -62,6 +69,22 @@ def run(ctx, input, output):
 
 run.declared_inputs = ["input"]
 run.declared_outputs = ["output"]
+```
+
+For stream mode, mark steps as stream-capable and return chunk iterators:
+
+```python
+def run(ctx, input, output):
+    def _iter_chunks():
+        for chunk in input:
+            frame = chunk.copy()
+            frame["amount"] = frame["amount"] * 2
+            yield frame
+    return {"output": _iter_chunks()}
+
+run.declared_inputs = ["input"]
+run.declared_outputs = ["output"]
+run.supports_stream = True
 ```
 
 ### Run from CLI (YAML-first)
@@ -99,6 +122,16 @@ python -m trakt.run_local \
   --input-dir /path/to/input \
   --output-dir /path/to/output \
   --manifest-path /path/to/output/custom-manifest.json
+```
+
+Tune stream chunk size (CSV stream mode):
+
+```bash
+python -m trakt.run_local \
+  --pipeline-file /path/to/pipeline.yaml \
+  --input-dir /path/to/input \
+  --output-dir /path/to/output \
+  --stream-chunk-size 10000
 ```
 
 ### Run from Python API
@@ -164,14 +197,17 @@ PYTHONPATH=examples/multi_file_demo python -m trakt.run_local \
 
 ## Execution Semantics (Important)
 
-Current MVP is in-memory batch processing:
+`batch` mode (default):
 - inputs are loaded as full CSV files into pandas DataFrames
 - multi-file inputs are combined into one DataFrame per input artifact
-- each step receives full DataFrame objects (not row-by-row records)
+- each step receives full DataFrame objects
 - step outputs stay in memory until final outputs are written
 
-This means processing is not streaming/chunked yet, so very large datasets may require
-future chunked IO or distributed/runtime extensions.
+`stream` mode (CSV, v1):
+- inputs are read in chunks (`--stream-chunk-size`)
+- stream-capable steps receive chunk iterators and return chunk iterators
+- CSV outputs are written incrementally chunk-by-chunk
+- multi-file stream combine currently supports `concat` only
 
 ## Outputs
 

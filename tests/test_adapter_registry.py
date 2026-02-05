@@ -26,11 +26,25 @@ class FancyAdapter(ArtifactAdapter):
         self.read_calls: list[list[Path]] = []
         self.write_calls: list[tuple[Any, str, str | None]] = []
 
-    def read_many(self, paths: list[Path], *, artifact: Artifact) -> Any:
+    def read_many(
+        self,
+        paths: list[Path],
+        *,
+        artifact: Artifact,
+        execution_mode: str = "batch",
+        chunk_size: int | None = None,
+    ) -> Any:
         self.read_calls.append(paths)
         return "loaded-by-fancy"
 
-    def write(self, data: Any, uri: str, *, artifact_name: str | None = None) -> None:
+    def write(
+        self,
+        data: Any,
+        uri: str,
+        *,
+        artifact_name: str | None = None,
+        execution_mode: str = "batch",
+    ) -> None:
         Path(uri).write_text(str(data), encoding="utf-8")
         self.write_calls.append((data, uri, artifact_name))
 

@@ -32,6 +32,12 @@ def main() -> None:
         default=None,
         help="Optional explicit manifest output path (default: <output-dir>/manifest.json).",
     )
+    parser.add_argument(
+        "--stream-chunk-size",
+        type=int,
+        default=50_000,
+        help="Chunk size for stream execution mode (CSV adapters only).",
+    )
     args = parser.parse_args()
 
     pipeline_file = _resolve_pipeline_file(args.pipeline, args.pipeline_file)
@@ -48,6 +54,7 @@ def main() -> None:
         run_id=args.run_id,
         pipeline_version=args.pipeline_version,
         manifest_path=args.manifest_path,
+        stream_chunk_size=args.stream_chunk_size,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
