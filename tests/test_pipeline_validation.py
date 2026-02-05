@@ -41,3 +41,52 @@ def test_pipeline_validation_reports_all_errors() -> None:
     assert error.missing_inputs == [("s1", "missing")]
     assert error.output_collisions == [("s2", "dup", "s1")]
     assert error.unknown_output_bindings == [("dataset", "unknown")]
+
+
+def test_pipeline_validation_rejects_invalid_execution_mode() -> None:
+    pipeline = Pipeline(
+        name="invalid_mode",
+        execution_mode="realtime",
+        inputs={},
+        steps=[DummyStep(id="s1", outputs=["records"])],
+        outputs={"dataset": "records"},
+    )
+
+    with pytest.raises(PipelineValidationError) as exc_info:
+        pipeline.validate()
+
+    assert exc_info.value.invalid_execution_mode == "realtime"
+
+
+def test_pipeline_validation_rejects_incompatible_stream_steps() -> None:
+    pipeline = Pipeline(
+        name="stream_incompatible",
+        execution_mode="stream",
+        inputs={},
+        steps=[DummyStep(id="s1", outputs=["records"])],
+        outputs={"dataset": "records"},
+    )
+
+    with pytest.raises(PipelineValidationError) as exc_info:
+        pipeline.validate()
+
+    assert exc_info.value.incompatible_steps == [("s1", "stream")]
+
+
+def test_pipeline_validation_accepts_stream_capable_step() -> None:
+    pipeline = Pipeline(
+        name="stream_ok",
+        execution_mode="stream",
+        inputs={},
+        steps=[
+            DummyStep(
+                id="s1",
+                outputs=["records"],
+                supports_batch=False,
+                supports_stream=True,
+            )
+        ],
+        outputs={"dataset": "records"},
+    )
+
+    pipeline.validate()

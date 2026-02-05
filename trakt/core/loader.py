@@ -28,11 +28,18 @@ def load_pipeline_from_yaml(
 
     step_registry = registry or StepRegistry.from_entry_points()
     name = str(payload.get("name") or path.parent.name or path.stem)
+    execution_mode = _parse_execution_mode(payload)
     inputs = _parse_inputs(payload.get("inputs", {}))
     steps = _parse_steps(payload.get("steps", []), registry=step_registry)
     outputs = _parse_outputs(payload.get("outputs", {}))
 
-    pipeline = Pipeline(name=name, inputs=inputs, steps=steps, outputs=outputs)
+    pipeline = Pipeline(
+        name=name,
+        execution_mode=execution_mode,
+        inputs=inputs,
+        steps=steps,
+        outputs=outputs,
+    )
     try:
         pipeline.validate()
     except (PipelineValidationError, StepBindingError) as exc:
@@ -176,3 +183,33 @@ def _parse_outputs(raw_outputs: Any) -> dict[str, str]:
         return parsed_outputs
 
     raise PipelineLoadError("Pipeline 'outputs' must be a mapping.")
+
+
+def _parse_execution_mode(payload: dict[str, Any]) -> str:
+    raw_execution = payload.get("execution")
+    top_level_mode = payload.get("execution_mode")
+
+    if raw_execution is None:
+        return _coerce_execution_mode(top_level_mode, field_name="execution_mode")
+
+    if not isinstance(raw_execution, dict):
+        raise PipelineLoadError("Pipeline 'execution' must be a mapping.")
+
+    nested_mode = raw_execution.get("mode")
+    if nested_mode is not None and top_level_mode is not None and nested_mode != top_level_mode:
+        raise PipelineLoadError(
+            "Pipeline defines conflicting execution modes in 'execution.mode' and 'execution_mode'."
+        )
+
+    return _coerce_execution_mode(
+        nested_mode if nested_mode is not None else top_level_mode,
+        field_name="execution.mode",
+    )
+
+
+def _coerce_execution_mode(value: Any, field_name: str) -> str:
+    if value is None:
+        return "batch"
+    if not isinstance(value, str):
+        raise PipelineLoadError(f"Pipeline '{field_name}' must be a string.")
+    return value.strip().lower() or "batch"

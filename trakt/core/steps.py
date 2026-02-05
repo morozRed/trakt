@@ -17,6 +17,8 @@ class Step(ABC):
     id: str
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
+    supports_batch: bool = True
+    supports_stream: bool = False
 
     @abstractmethod
     def run(self, ctx: Context, **kwargs: Any) -> dict[str, Any]:
@@ -62,6 +64,14 @@ class ResolvedStep(Step):
             bindings=resolved_bindings,
             declared_inputs=declared_inputs,
             declared_outputs=declared_outputs,
+            supports_batch=_coerce_capability(
+                getattr(handler, "supports_batch", True),
+                field_name="supports_batch",
+            ),
+            supports_stream=_coerce_capability(
+                getattr(handler, "supports_stream", False),
+                field_name="supports_stream",
+            ),
         )
         step.validate_bindings()
         step.inputs = step._resolve_bound_inputs()
@@ -190,4 +200,18 @@ def _coerce_binding_values(value: Any, step_id: str, key: str) -> list[str]:
 
     raise StepBindingError(
         f"Step '{step_id}' binding '{key}' must be a string, list, or mapping."
+    )
+
+
+def _coerce_capability(value: Any, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+    raise ValueError(
+        f"Step capability '{field_name}' must be a bool or boolean-like string."
     )

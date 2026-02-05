@@ -2,7 +2,9 @@ import sys
 import textwrap
 import types
 
-from trakt.core.loader import load_pipeline_from_yaml
+import pytest
+
+from trakt.core.loader import PipelineLoadError, load_pipeline_from_yaml
 from trakt.core.registry import StepRegistry
 
 
@@ -91,3 +93,77 @@ def test_loader_resolves_registry_alias(tmp_path) -> None:
     pipeline = load_pipeline_from_yaml(pipeline_file, registry=registry)
     assert pipeline.steps[0].id == "normalize"
     assert pipeline.steps[0].inputs == ["source__records"]
+
+
+def test_loader_parses_execution_mode_and_step_capabilities(tmp_path) -> None:
+    def run(ctx, source, target):
+        return {"target": source}
+
+    run.declared_inputs = ["source"]
+    run.declared_outputs = ["target"]
+    run.supports_stream = True
+
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: stream_module
+            execution:
+              mode: stream
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: normalize.stream
+                with:
+                  source: source__records
+                  target: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    registry = StepRegistry()
+    registry.register("normalize.stream", run)
+    pipeline = load_pipeline_from_yaml(pipeline_file, registry=registry)
+    assert pipeline.execution_mode == "stream"
+    assert pipeline.steps[0].supports_stream is True
+
+
+def test_loader_rejects_conflicting_execution_modes(tmp_path) -> None:
+    pipeline_file = tmp_path / "pipeline.yaml"
+    pipeline_file.write_text(
+        textwrap.dedent(
+            """
+            name: conflicting_mode
+            execution_mode: batch
+            execution:
+              mode: stream
+            inputs:
+              source__records:
+                uri: records.csv
+            steps:
+              - id: normalize
+                uses: steps.normalize.demo
+                with:
+                  input: source__records
+                  output: records_norm
+            outputs:
+              datasets:
+                - name: final
+                  from: records_norm
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _build_direct_module()
+    with pytest.raises(PipelineLoadError, match="conflicting execution modes"):
+        load_pipeline_from_yaml(pipeline_file)
