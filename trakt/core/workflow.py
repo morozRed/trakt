@@ -1,4 +1,4 @@
-"""Python builder API for creating and running pipelines."""
+"""Python DSL for creating and running pipelines."""
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Self
@@ -13,17 +13,28 @@ StepHandler = Callable[..., dict[str, Any]]
 
 @dataclass(slots=True)
 class WorkflowStep:
-    """Declarative step definition used by WorkflowBuilder."""
+    """Reusable step specification for Python-defined workflows."""
 
     step_id: str
     uses: str | None = None
     handler: StepHandler | None = None
     bindings: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if (self.uses is None) == (self.handler is None):
+            raise ValueError(
+                f"Workflow step '{self.step_id}' must define exactly one of 'uses' or 'run'."
+            )
+
+    def bind(self, **bindings: Any) -> Self:
+        """Set step bindings and return this step."""
+        self.bindings = dict(bindings)
+        return self
+
 
 @dataclass(slots=True)
 class WorkflowBuilder:
-    """Build a Pipeline using a Python API instead of YAML."""
+    """Build a Pipeline using a Python DSL instead of YAML."""
 
     name: str
     execution_mode: str = "batch"
@@ -52,31 +63,17 @@ class WorkflowBuilder:
         )
         return self
 
-    def step(
-        self,
-        step_id: str,
-        *,
-        uses: str | None = None,
-        run: StepHandler | None = None,
-        with_: dict[str, Any] | None = None,
-    ) -> Self:
-        if (uses is None) == (run is None):
-            raise ValueError(
-                f"Workflow step '{step_id}' must define exactly one of 'uses' or 'run'."
-            )
-        if with_ is None:
-            with_ = {}
-        if not isinstance(with_, dict):
-            raise TypeError(f"Workflow step '{step_id}' field 'with_' must be a mapping.")
+    def step(self, spec: WorkflowStep) -> Self:
+        """Append one pre-defined workflow step."""
+        if not isinstance(spec, WorkflowStep):
+            raise TypeError("WorkflowBuilder.step(...) expects a WorkflowStep instance.")
+        self._steps.append(spec)
+        return self
 
-        self._steps.append(
-            WorkflowStep(
-                step_id=step_id,
-                uses=uses,
-                handler=run,
-                bindings=dict(with_),
-            )
-        )
+    def steps(self, specs: list[WorkflowStep]) -> Self:
+        """Append multiple pre-defined workflow steps in order."""
+        for spec in specs:
+            self.step(spec)
         return self
 
     def output(self, name: str, *, from_: str) -> Self:
@@ -140,6 +137,16 @@ class WorkflowBuilder:
                 f"Failed to resolve workflow step '{spec.step_id}' using '{spec.uses}': {exc}"
             ) from exc
         return handler, spec.uses
+
+
+def step(
+    step_id: str,
+    *,
+    uses: str | None = None,
+    run: StepHandler | None = None,
+) -> WorkflowStep:
+    """Create a reusable workflow step specification."""
+    return WorkflowStep(step_id=step_id, uses=uses, handler=run)
 
 
 def workflow(

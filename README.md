@@ -180,7 +180,7 @@ print(result["manifest_path"])
 Or define the workflow directly in Python:
 
 ```python
-from trakt import workflow
+from trakt import step, workflow
 from trakt.runtime.local_runner import LocalRunner
 
 
@@ -197,10 +197,13 @@ runner = LocalRunner(input_dir="data/input", output_dir="data/output")
 result = (
     workflow("python_workflow")
     .input("source__records", uri="records.csv")
-    .step(
-        "double_amount",
-        run=double_amount,
-        with_={"input": "source__records", "output": "records_norm"},
+    .steps(
+        [
+            step("double_amount", run=double_amount).bind(
+                input="source__records",
+                output="records_norm",
+            )
+        ]
     )
     .output("final", from_="records_norm")
     .run(runner, run_id="py-dev")
