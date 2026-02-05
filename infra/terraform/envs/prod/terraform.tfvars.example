@@ -1,0 +1,23 @@
+job_name               = "trakt-prod-etl"
+script_s3_path         = "s3://my-prod-bucket/trakt/releases/v1/scripts/glue_main.py"
+extra_py_files_s3_path = "s3://my-prod-bucket/trakt/releases/v1/framework/trakt_etl_framework-0.1.0-py3-none-any.whl"
+temp_dir               = "s3://my-prod-bucket/trakt/temp/"
+
+s3_input_prefixes = [
+  "arn:aws:s3:::my-prod-bucket/raw/",
+]
+
+s3_output_prefixes = [
+  "arn:aws:s3:::my-prod-bucket/curated/",
+  "arn:aws:s3:::my-prod-bucket/manifests/",
+]
+
+default_arguments = {
+  "--pipeline"   = "travel_enrichment__cytric"
+  "--input-dir"  = "s3://my-prod-bucket/raw/client={{client_id}}/batch={{batch_id}}/"
+  "--output-dir" = "s3://my-prod-bucket/curated/client={{client_id}}/batch={{batch_id}}/"
+}
+
+tags = {
+  owner = "data-platform"
+}

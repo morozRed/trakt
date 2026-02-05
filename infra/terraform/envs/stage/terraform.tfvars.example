@@ -1,0 +1,19 @@
+job_name               = "trakt-stage-etl"
+script_s3_path         = "s3://my-bucket/trakt/releases/v1/scripts/glue_main.py"
+extra_py_files_s3_path = "s3://my-bucket/trakt/releases/v1/framework/trakt_etl_framework-0.1.0-py3-none-any.whl"
+temp_dir               = "s3://my-bucket/trakt/temp/"
+
+s3_input_prefixes = [
+  "arn:aws:s3:::my-bucket-stage/raw/",
+]
+
+s3_output_prefixes = [
+  "arn:aws:s3:::my-bucket-stage/curated/",
+  "arn:aws:s3:::my-bucket-stage/manifests/",
+]
+
+default_arguments = {
+  "--pipeline"   = "travel_enrichment__cytric"
+  "--input-dir"  = "s3://my-bucket-stage/raw/client={{client_id}}/batch={{batch_id}}/"
+  "--output-dir" = "s3://my-bucket-stage/curated/client={{client_id}}/batch={{batch_id}}/"
+}
