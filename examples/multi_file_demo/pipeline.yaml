@@ -9,8 +9,8 @@ steps:
   - id: double_amount
     uses: steps.normalize.double_amount
     with:
-      input: source__records
-      output: records_norm
+      records: source__records
+      normalized: records_norm
 
 outputs:
   datasets:

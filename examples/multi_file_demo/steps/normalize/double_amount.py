@@ -1,8 +1,8 @@
-def run(ctx, input, output):
-    frame = input.copy()
+def run(ctx, records, normalized):
+    frame = records.copy()
     frame["amount"] = frame["amount"] * 2
-    return {"output": frame}
+    return {"normalized": frame}
 
 
-run.declared_inputs = ["input"]
-run.declared_outputs = ["output"]
+run.declared_inputs = ["records"]
+run.declared_outputs = ["normalized"]
