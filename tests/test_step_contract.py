@@ -36,6 +36,21 @@ def test_step_contract_rejects_duplicate_names() -> None:
             return {"output": input}
 
 
+def test_step_contract_rejects_missing_handler_parameter() -> None:
+    with pytest.raises(StepBindingError, match="missing parameters.*\\['amount'\\]"):
+        @step_contract(inputs=["input", "amount"], outputs=["output"])
+        def run(ctx, input):
+            return {"output": input}
+
+
+def test_step_contract_allows_kwargs_catchall() -> None:
+    @step_contract(inputs=["input", "amount"], outputs=["output"])
+    def run(ctx, input, **kwargs):
+        return {"output": input}
+
+    assert run.declared_inputs == ["input", "amount"]
+
+
 def test_step_binding_error_suggests_closest_binding_name() -> None:
     @step_contract(inputs=["input"], outputs=["output"])
     def run(ctx, input):

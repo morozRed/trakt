@@ -39,6 +39,10 @@ def get_tracer(**kwargs: Any) -> Any:
     except ImportError:
         return NoOpTracer()
 
+    current_provider = trace.get_tracer_provider()
+    if isinstance(current_provider, TracerProvider):
+        return current_provider.get_tracer(tracer_name)
+
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     trace.set_tracer_provider(provider)
     return trace.get_tracer(tracer_name)

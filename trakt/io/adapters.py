@@ -2,11 +2,12 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
-from collections import defaultdict
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Any
+
+from trakt.core.compat import group_entry_points
 
 from trakt.core.artifacts import (
     Artifact,
@@ -125,7 +126,7 @@ class ArtifactAdapterRegistry:
 
     def load_entry_points(self, group: str = "trakt.artifact_adapters") -> None:
         discovered = metadata.entry_points()
-        grouped = _group_entry_points(discovered)
+        grouped = group_entry_points(discovered)
         for entry_point in grouped.get(group, []):
             loaded = entry_point.load()
             adapter = _coerce_adapter(loaded, kind=entry_point.name)
@@ -297,17 +298,3 @@ def _coerce_adapter(loaded: Any, *, kind: str) -> ArtifactAdapter:
     )
 
 
-def _group_entry_points(
-    entry_points: metadata.EntryPoints | dict[str, list[metadata.EntryPoint]],
-) -> dict[str, list[metadata.EntryPoint]]:
-    if hasattr(entry_points, "select"):
-        grouped: dict[str, list[metadata.EntryPoint]] = defaultdict(list)
-        for entry_point in entry_points:  # type: ignore[assignment]
-            grouped[entry_point.group].append(entry_point)
-        return dict(grouped)
-
-    grouped = {
-        group: list(entries)
-        for group, entries in entry_points.items()  # type: ignore[union-attr]
-    }
-    return grouped

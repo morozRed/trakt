@@ -166,11 +166,10 @@ inputs:
 
 ### Run from CLI (YAML-first)
 
-You can run by explicit YAML path:
+The recommended entry point is the unified `trakt` CLI:
 
 ```bash
-PYTHONPATH=/path/to/your/project python -m trakt.run_local \
-  --pipeline-file /path/to/pipeline.yaml \
+trakt run --pipeline-file /path/to/pipeline.yaml \
   --input-dir /path/to/input \
   --output-dir /path/to/output
 ```
@@ -178,8 +177,11 @@ PYTHONPATH=/path/to/your/project python -m trakt.run_local \
 Or by pipeline name (`pipelines/<name>/pipeline.yaml`):
 
 ```bash
-python -m trakt.run_local --pipeline <pipeline_name> --input-dir <in> --output-dir <out>
+trakt run --pipeline <pipeline_name> --input-dir <in> --output-dir <out>
 ```
+
+Step modules are auto-discovered relative to the pipeline file location
+(no `PYTHONPATH` needed).
 
 Override one input source:
 
@@ -198,7 +200,7 @@ python -m trakt.run_local \
   --pipeline-file /path/to/pipeline.yaml \
   --input-dir /path/to/input \
   --output-dir /path/to/output \
-  --strict-keys \
+  --lenient \
   --param normalize.currency=usd \
   --param normalize.multiplier=2
 ```
@@ -271,8 +273,8 @@ print(result["status"])
 print(result["manifest_path"])
 ```
 
-`strict_unknown_keys=True` (or CLI `--strict-keys`) enables fail-fast validation
-for unknown fields in input/step/output definitions.
+Strict validation of unknown fields is enabled by default. Use `strict_unknown_keys=False`
+(or CLI `--lenient`) to allow unknown fields in input/step/output definitions.
 
 Or define the workflow directly in Python:
 
@@ -315,7 +317,7 @@ Example with literal strings (no `const(...)` required):
 step("normalize", run=double_amount).input(input=ref("source__records")).params(currency="usd").output(output=ref("records_norm"))
 ```
 
-`in_(...)` / `out(...)` remain available as shorter aliases.
+Use `.input(...)` for artifact refs, `.params(...)` for literals, `.output(...)` for output bindings.
 
 Built-in quality gate step:
 
@@ -339,7 +341,7 @@ Built-in quality gate step:
 Multiple inputs for one step:
 
 ```python
-from trakt import step_contract
+from trakt import artifact, ref, step, step_contract
 
 input_1 = artifact("source__records").at("records.csv")
 input_2 = artifact("source__countries").at("countries.csv")
@@ -352,8 +354,8 @@ def join_inputs(ctx, inputs):
 
 join_step = (
     step("join_inputs", run=join_inputs)
-    .bind_inputs(input_1, input_2)
-    .bind_output("records_joined")
+    .input(inputs=[ref("source__records"), ref("source__countries")])
+    .output(output=ref("records_joined"))
 )
 ```
 
@@ -368,14 +370,13 @@ step("normalize", run=normalize).input(input=ref("source__records")).params(curr
 CLI (80% case):
 
 ```bash
-python -m trakt.run_local --pipeline-file pipelines/demo/pipeline.yaml --input-dir data/in --output-dir data/out --strict-keys
+python -m trakt.run_local --pipeline-file pipelines/demo/pipeline.yaml --input-dir data/in --output-dir data/out --lenient
 ```
 
 ## Run Included Example
 
 ```bash
-PYTHONPATH=examples/multi_file_demo python -m trakt.run_local \
-  --pipeline-file examples/multi_file_demo/pipeline.yaml \
+trakt run --pipeline-file examples/multi_file_demo/pipeline.yaml \
   --input-dir examples/multi_file_demo/input \
   --output-dir /tmp/trakt-demo-output
 ```
@@ -383,7 +384,7 @@ PYTHONPATH=examples/multi_file_demo python -m trakt.run_local \
 Glue smoke example (anonymized):
 
 ```bash
-PYTHONPATH=examples/glue_smoke python -m trakt.runtime.glue_main \
+python -m trakt.runtime.glue_main \
   --pipeline-file examples/glue_smoke/pipeline.yaml \
   --client-id demo \
   --batch-id smoke-20260205 \

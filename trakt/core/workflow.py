@@ -86,7 +86,7 @@ class WorkflowStep:
             )
         return self
 
-    def in_(self, **bindings: Any) -> Self:
+    def input(self, **bindings: Any) -> Self:
         """Bind step inputs to artifact references."""
         for key, value in bindings.items():
             self.bindings[key] = _normalize_ref_binding_value(
@@ -96,17 +96,13 @@ class WorkflowStep:
             )
         return self
 
-    def input(self, **bindings: Any) -> Self:
-        """Alias for in_(...) to avoid keyword-style naming in user code."""
-        return self.in_(**bindings)
-
     def params(self, **bindings: Any) -> Self:
         """Bind literal config values without requiring const(...) wrappers."""
         for key, value in bindings.items():
             self.bindings[key] = const(value)
         return self
 
-    def out(self, **bindings: Any) -> Self:
+    def output(self, **bindings: Any) -> Self:
         """Bind step outputs to artifact references."""
         for key, value in bindings.items():
             self.bindings[key] = _normalize_ref_binding_value(
@@ -114,66 +110,6 @@ class WorkflowStep:
                 step_id=self.step_id,
                 binding_key=key,
             )
-        return self
-
-    def output(self, **bindings: Any) -> Self:
-        """Alias for out(...) with a more explicit name."""
-        return self.out(**bindings)
-
-    def bind_input(
-        self,
-        artifact_ref: str | WorkflowRef | WorkflowArtifact | Artifact,
-        *,
-        param: str = "input",
-    ) -> Self:
-        self.bindings[param] = _artifact_name(
-            artifact_ref,
-            step_id=self.step_id,
-            binding_key=param,
-        )
-        return self
-
-    def bind_inputs(
-        self,
-        *artifact_refs: str | WorkflowRef | WorkflowArtifact | Artifact,
-        param: str = "inputs",
-    ) -> Self:
-        if not artifact_refs:
-            raise ValueError(
-                f"Workflow step '{self.step_id}' bind_inputs requires at least one input."
-            )
-        self.bindings[param] = [
-            _artifact_name(artifact_ref, step_id=self.step_id, binding_key=param)
-            for artifact_ref in artifact_refs
-        ]
-        return self
-
-    def bind_output(
-        self,
-        artifact_ref: str | WorkflowRef | WorkflowArtifact | Artifact,
-        *,
-        param: str = "output",
-    ) -> Self:
-        self.bindings[param] = _artifact_name(
-            artifact_ref,
-            step_id=self.step_id,
-            binding_key=param,
-        )
-        return self
-
-    def bind_outputs(
-        self,
-        *artifact_refs: str | WorkflowRef | WorkflowArtifact | Artifact,
-        param: str = "outputs",
-    ) -> Self:
-        if not artifact_refs:
-            raise ValueError(
-                f"Workflow step '{self.step_id}' bind_outputs requires at least one output."
-            )
-        self.bindings[param] = [
-            _artifact_name(artifact_ref, step_id=self.step_id, binding_key=param)
-            for artifact_ref in artifact_refs
-        ]
         return self
 
 

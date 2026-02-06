@@ -2,8 +2,8 @@
 
 import argparse
 import json
-from pathlib import Path
 
+from trakt.cli import parse_input_overrides, resolve_pipeline_file
 from trakt.core.loader import load_pipeline_from_yaml
 from trakt.core.overrides import apply_const_overrides, parse_param_overrides
 from trakt.runtime.local_runner import LocalRunner
@@ -34,9 +34,9 @@ def main() -> None:
         help="Override a const binding (value parsed as YAML).",
     )
     parser.add_argument(
-        "--strict-keys",
+        "--lenient",
         action="store_true",
-        help="Fail fast on unknown keys in input/step/output definitions.",
+        help="Allow unknown keys in input/step/output definitions (default: strict).",
     )
     parser.add_argument("--run-id", default=None, help="Optional explicit run id")
     parser.add_argument(
@@ -72,13 +72,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    pipeline_file = _resolve_pipeline_file(args.pipeline, args.pipeline_file)
-    overrides = _parse_input_overrides(args.input)
+    pipeline_file = resolve_pipeline_file(args.pipeline, args.pipeline_file)
+    overrides = parse_input_overrides(args.input)
     param_overrides = parse_param_overrides(args.param)
 
     pipeline = load_pipeline_from_yaml(
         pipeline_file,
-        strict_unknown_keys=args.strict_keys,
+        strict_unknown_keys=not args.lenient,
     )
     apply_const_overrides(pipeline, param_overrides)
     runner = LocalRunner(
@@ -97,30 +97,6 @@ def main() -> None:
         otel_tracer_name=args.otel_tracer_name,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
-
-
-def _resolve_pipeline_file(
-    pipeline_name: str | None, pipeline_file: str | None
-) -> Path:
-    if pipeline_file:
-        return Path(pipeline_file)
-    if pipeline_name:
-        return Path("pipelines") / pipeline_name / "pipeline.yaml"
-    raise ValueError("Provide either --pipeline or --pipeline-file.")
-
-
-def _parse_input_overrides(raw_overrides: list[str]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for item in raw_overrides:
-        if "=" not in item:
-            raise ValueError(f"Invalid input override '{item}'. Expected NAME=PATH.")
-        key, value = item.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key or not value:
-            raise ValueError(f"Invalid input override '{item}'. Expected NAME=PATH.")
-        parsed[key] = value
-    return parsed
 
 
 if __name__ == "__main__":

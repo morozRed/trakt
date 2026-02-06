@@ -1,5 +1,6 @@
 """Pipeline YAML loading and step resolution."""
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -19,10 +20,17 @@ def load_pipeline_from_yaml(
     pipeline_file: str | Path,
     registry: StepRegistry | None = None,
     *,
-    strict_unknown_keys: bool = False,
+    strict_unknown_keys: bool = True,
+    auto_syspath: bool = True,
 ) -> Pipeline:
     """Build and validate a pipeline from a YAML definition file."""
     path = Path(pipeline_file)
+
+    if auto_syspath:
+        parent_dir = str(path.resolve().parent)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+
     payload = _read_yaml(path)
     if not isinstance(payload, dict):
         raise PipelineLoadError(

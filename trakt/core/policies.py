@@ -47,6 +47,13 @@ class QualityGatePolicy:
     max_null_ratio: dict[str, float] = field(default_factory=dict)
     gate_modes: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.mode = str(self.mode).strip().lower()
+        self.gate_modes = {
+            str(name): str(mode).strip().lower()
+            for name, mode in self.gate_modes.items()
+        }
+
 
 def apply_join_policy(
     left: Any,
@@ -409,12 +416,9 @@ def _coerce_max_null_ratio(value: Any) -> dict[str, float]:
 
 
 def _validate_quality_policy(policy: QualityGatePolicy) -> None:
-    default_mode = _normalize_quality_mode(policy.mode, field_name="mode")
-    policy.mode = default_mode
-    policy.gate_modes = {
-        str(name): _normalize_quality_mode(mode, field_name=f"gate_modes.{name}")
-        for name, mode in policy.gate_modes.items()
-    }
+    _normalize_quality_mode(policy.mode, field_name="mode")
+    for name, mode in policy.gate_modes.items():
+        _normalize_quality_mode(mode, field_name=f"gate_modes.{name}")
     if policy.row_count_min is not None and policy.row_count_min < 0:
         raise ValueError("Quality gate row_count min must be >= 0.")
     if policy.row_count_max is not None and policy.row_count_max < 0:

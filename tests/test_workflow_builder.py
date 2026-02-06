@@ -20,8 +20,8 @@ def test_workflow_builder_builds_pipeline_from_step_specs() -> None:
         .source(artifact("source__records").at("records.csv"))
         .step(
             step("normalize", run=normalize)
-            .bind_input(artifact("source__records").at("records.csv"))
-            .bind_output("records_norm")
+            .input(input=ref("source__records"))
+            .output(output=ref("records_norm"))
         )
         .output("final", from_="records_norm")
         .build()
@@ -50,11 +50,11 @@ def test_workflow_builder_steps_method_appends_multiple_steps() -> None:
         .steps(
             [
                 step("normalize", run=normalize)
-                .bind_input(artifact("source__records"))
-                .bind_output("records_norm"),
+                .input(input=ref("source__records"))
+                .output(output=ref("records_norm")),
                 step("enrich", run=enrich)
-                .bind_input(artifact("records_norm"))
-                .bind_output("records_enriched"),
+                .input(input=ref("records_norm"))
+                .output(output=ref("records_enriched")),
             ]
         )
         .output("final", from_="records_enriched")
@@ -114,8 +114,8 @@ def test_workflow_builder_supports_multiple_workflow_inputs(tmp_path) -> None:
         .sources([input_1, input_2])
         .step(
             step("join_inputs", run=join_inputs)
-            .bind_inputs(input_1, input_2)
-            .bind_output("records_joined")
+            .input(inputs=[ref("source__records"), ref("source__countries")])
+            .output(output=ref("records_joined"))
         )
         .output("final", from_="records_joined")
         .run(LocalRunner(input_dir=input_dir, output_dir=output_dir), run_id="multi-input")
@@ -151,6 +151,11 @@ def test_workflow_step_bind_normalizes_artifact_values() -> None:
     assert spec.bindings["inputs"] == ["source__records", "source__fallback"]
 
 
+def test_workflow_step_rejects_invalid_artifact_reference() -> None:
+    with pytest.raises(TypeError, match="artifact"):
+        step("x", uses="normalize.alias").input(input=123)  # type: ignore[arg-type]
+
+
 def test_workflow_step_helpers_separate_refs_from_params() -> None:
     spec = (
         step("normalize", uses="normalize.alias")
@@ -168,9 +173,9 @@ def test_workflow_step_helpers_separate_refs_from_params() -> None:
     assert get_const_binding_value(spec.bindings["options"]) == {"mode": "strict"}
 
 
-def test_workflow_step_in_helper_rejects_literal_numbers() -> None:
+def test_workflow_step_input_helper_rejects_literal_numbers() -> None:
     with pytest.raises(TypeError, match="Use .params"):
-        step("normalize", uses="normalize.alias").in_(input=123)  # type: ignore[arg-type]
+        step("normalize", uses="normalize.alias").input(input=123)  # type: ignore[arg-type]
 
 
 def test_workflow_step_input_output_aliases_match_existing_helpers() -> None:
@@ -199,11 +204,6 @@ def test_workflow_builder_rejects_non_step_argument() -> None:
         workflow("invalid").step("not-a-step")  # type: ignore[arg-type]
 
 
-def test_workflow_step_rejects_invalid_artifact_reference() -> None:
-    with pytest.raises(TypeError, match="expects str/WorkflowRef/WorkflowArtifact/Artifact"):
-        step("x", uses="normalize.alias").bind_input(123)  # type: ignore[arg-type]
-
-
 def test_workflow_builder_run_executes_with_local_runner(tmp_path) -> None:
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
@@ -225,8 +225,8 @@ def test_workflow_builder_run_executes_with_local_runner(tmp_path) -> None:
         .steps(
             [
                 step("double_amount", run=double_amount)
-                .bind_input("source__records")
-                .bind_output("records_norm")
+                .input(input=ref("source__records"))
+                .output(output=ref("records_norm"))
             ]
         )
         .output("final", from_="records_norm")

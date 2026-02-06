@@ -1,11 +1,12 @@
 """Step resolution registry."""
 
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib import import_module
 from importlib import metadata
 from typing import Any
+
+from trakt.core.compat import group_entry_points
 
 StepFactory = Callable[..., Any]
 
@@ -34,7 +35,7 @@ class StepRegistry:
     def load_entry_points(self, group: str = "trakt.steps") -> None:
         """Register step aliases from Python entry points."""
         discovered = metadata.entry_points()
-        grouped = _group_entry_points(discovered)
+        grouped = group_entry_points(discovered)
         for entry_point in grouped.get(group, []):
             self.register(entry_point.name, entry_point.load())
 
@@ -55,17 +56,3 @@ def _load_module_step(module_path: str) -> StepFactory:
     return handler
 
 
-def _group_entry_points(
-    entry_points: metadata.EntryPoints | dict[str, list[metadata.EntryPoint]],
-) -> dict[str, list[metadata.EntryPoint]]:
-    if hasattr(entry_points, "select"):
-        grouped: dict[str, list[metadata.EntryPoint]] = defaultdict(list)
-        for entry_point in entry_points:  # type: ignore[assignment]
-            grouped[entry_point.group].append(entry_point)
-        return dict(grouped)
-
-    grouped = {
-        group: list(entries)
-        for group, entries in entry_points.items()  # type: ignore[union-attr]
-    }
-    return grouped

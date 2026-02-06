@@ -3,7 +3,8 @@
 from dataclasses import dataclass, field
 
 from trakt.core.artifacts import Artifact, CombineStrategy, OutputDataset
-from trakt.core.steps import Step
+from trakt.core.bindings import is_const_binding
+from trakt.core.steps import ResolvedStep, Step
 
 
 class PipelineValidationError(ValueError):
@@ -19,6 +20,7 @@ class PipelineValidationError(ValueError):
         unused_inputs: list[str] | None = None,
         output_collisions: list[tuple[str, str, str]] | None = None,
         unknown_output_bindings: list[tuple[str, str]] | None = None,
+        suspected_literal_bindings: list[tuple[str, str, str]] | None = None,
     ) -> None:
         self.invalid_execution_mode = invalid_execution_mode
         self.incompatible_steps = incompatible_steps or []
@@ -27,6 +29,7 @@ class PipelineValidationError(ValueError):
         self.unused_inputs = unused_inputs or []
         self.output_collisions = output_collisions or []
         self.unknown_output_bindings = unknown_output_bindings or []
+        self.suspected_literal_bindings = suspected_literal_bindings or []
 
         details: list[str] = []
         if self.invalid_execution_mode:
@@ -73,6 +76,14 @@ class PipelineValidationError(ValueError):
                     for target, source in self.unknown_output_bindings
                 )
             )
+        if self.suspected_literal_bindings:
+            details.append(
+                "suspected literal bindings (use {const: value})="
+                + ", ".join(
+                    f"{step_id}.{key}='{value}'"
+                    for step_id, key, value in self.suspected_literal_bindings
+                )
+            )
         message = "; ".join(details) if details else "pipeline validation failed"
         super().__init__(message)
 
@@ -87,10 +98,12 @@ class Pipeline:
     steps: list[Step] = field(default_factory=list)
     outputs: dict[str, OutputDataset | str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.execution_mode = str(self.execution_mode).strip().lower()
+
     def validate(self) -> None:
         """Validate input/output wiring across the full step chain."""
-        mode = str(self.execution_mode).strip().lower()
-        self.execution_mode = mode
+        mode = self.execution_mode
 
         invalid_execution_mode: str | None = None
         if mode not in {"batch", "stream"}:
@@ -150,6 +163,10 @@ class Pipeline:
             if source not in available_names:
                 unknown_output_bindings.append((target, source))
 
+        suspected_literal_bindings = _detect_suspected_literals(
+            self.steps, available_names
+        )
+
         if (
             invalid_execution_mode
             or incompatible_steps
@@ -158,6 +175,7 @@ class Pipeline:
             or unused_inputs
             or output_collisions
             or unknown_output_bindings
+            or suspected_literal_bindings
         ):
             raise PipelineValidationError(
                 invalid_execution_mode=invalid_execution_mode,
@@ -167,7 +185,27 @@ class Pipeline:
                 unused_inputs=unused_inputs,
                 output_collisions=output_collisions,
                 unknown_output_bindings=unknown_output_bindings,
+                suspected_literal_bindings=suspected_literal_bindings,
             )
+
+
+def _detect_suspected_literals(
+    steps: list[Step], available_names: set[str]
+) -> list[tuple[str, str, str]]:
+    """Detect string bindings that look like literal values rather than artifact refs."""
+    suspects: list[tuple[str, str, str]] = []
+    for step in steps:
+        if not isinstance(step, ResolvedStep):
+            continue
+        for key, value in step.input_bindings().items():
+            if is_const_binding(value):
+                continue
+            if not isinstance(value, str):
+                continue
+            if value in available_names:
+                continue
+            suspects.append((step.id, key, value))
+    return suspects
 
 
 def _is_required_input(artifact: Artifact) -> bool:

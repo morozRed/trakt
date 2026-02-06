@@ -4,7 +4,7 @@ import pytest
 
 from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.pipeline import Pipeline, PipelineValidationError
-from trakt.core.steps import Step
+from trakt.core.steps import ResolvedStep, Step, step_contract
 
 
 @dataclass(slots=True)
@@ -140,3 +140,38 @@ def test_pipeline_validation_supports_output_dataset_objects() -> None:
     )
 
     pipeline.validate()
+
+
+def test_pipeline_validation_detects_suspected_literal_bindings() -> None:
+    @step_contract(inputs=["input", "currency"], outputs=["output"])
+    def run(ctx, input, currency):
+        return {"output": input}
+
+    resolved = ResolvedStep.from_definition(
+        step_id="normalize",
+        uses="steps.normalize.demo",
+        handler=run,
+        bindings={
+            "input": "source__records",
+            "currency": "usd",
+            "output": "records_norm",
+        },
+    )
+
+    pipeline = Pipeline(
+        name="literal_suspect",
+        inputs={
+            "source__records": Artifact(
+                name="source__records", kind="csv", uri="records.csv"
+            )
+        },
+        steps=[resolved],
+        outputs={"dataset": "records_norm"},
+    )
+
+    with pytest.raises(PipelineValidationError) as exc_info:
+        pipeline.validate()
+
+    error = exc_info.value
+    assert error.suspected_literal_bindings == [("normalize", "currency", "usd")]
+    assert "const: value" in str(error)

@@ -15,9 +15,15 @@ dependencies = [
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.1"]
-dev = ["pytest>=8.0"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.4",
+  "mypy>=1.10",
+]
 
 [project.scripts]
+trakt = "trakt.cli:main"
 trakt-run-local = "trakt.run_local:main"
 trakt-run-glue = "trakt.runtime.glue_main:main"
 
@@ -26,3 +32,19 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["trakt*"]
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

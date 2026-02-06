@@ -9,7 +9,7 @@ from trakt.core.artifacts import Artifact, OutputDataset
 from trakt.core.context import Context
 from trakt.core.pipeline import Pipeline
 from trakt.io.adapters import ArtifactAdapterRegistry
-from trakt.runtime.runner_base import RunnerBase
+from trakt.runtime.runner_base import RunnerBase, _count_rows
 
 
 class LocalRunner(RunnerBase):
@@ -205,13 +205,6 @@ def _filter_supported_paths(
         for path in paths
         if path.is_file() and path.suffix.lower() == normalized_suffix
     )
-
-
-def _count_rows(payload: Any) -> int | None:
-    try:
-        return len(payload)
-    except TypeError:
-        return None
 
 
 def _coerce_output_dataset(

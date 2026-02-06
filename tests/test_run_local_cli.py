@@ -1,21 +1,15 @@
+"""Tests for the run_local.py CLI entrypoint."""
+
 import io
 import json
 import textwrap
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 import pytest
 
-from trakt.runtime import glue_main
 
-
-def test_parse_input_overrides_rejects_invalid_items() -> None:
-    from trakt.cli import parse_input_overrides
-
-    with pytest.raises(ValueError, match="Expected NAME=PATH"):
-        parse_input_overrides(["invalid"])
-
-
-def test_glue_main_runs_pipeline_with_required_contract(tmp_path, monkeypatch) -> None:
+def test_run_local_executes_pipeline_from_cli(tmp_path, monkeypatch) -> None:
     (tmp_path / "steps" / "normalize").mkdir(parents=True)
     (tmp_path / "steps" / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "steps" / "normalize" / "__init__.py").write_text("", encoding="utf-8")
@@ -45,7 +39,7 @@ def test_glue_main_runs_pipeline_with_required_contract(tmp_path, monkeypatch) -
     pipeline_file.write_text(
         textwrap.dedent(
             """
-            name: glue_contract_demo
+            name: run_local_demo
             inputs:
               source__records:
                 uri: records/*.csv
@@ -65,26 +59,34 @@ def test_glue_main_runs_pipeline_with_required_contract(tmp_path, monkeypatch) -
         encoding="utf-8",
     )
 
+    from trakt.run_local import main
+
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        glue_main.main(
+        with patch(
+            "sys.argv",
             [
+                "trakt-run-local",
                 "--pipeline-file",
                 str(pipeline_file),
-                "--client-id",
-                "acme",
-                "--batch-id",
-                "batch-20260205",
                 "--input-dir",
                 str(input_dir),
                 "--output-dir",
                 str(output_dir),
-                "--job-name",
-                "trakt-glue-demo",
-            ]
-        )
+                "--lenient",
+            ],
+        ):
+            main()
 
     payload = json.loads(stdout.getvalue())
     assert payload["status"] == "success"
     assert payload["outputs"]["final"]["rows"] == 1
     assert (output_dir / "manifest.json").exists()
+
+
+def test_run_local_raises_on_missing_pipeline_file() -> None:
+    from trakt.run_local import main
+
+    with pytest.raises(ValueError, match="--pipeline or --pipeline-file"):
+        with patch("sys.argv", ["trakt-run-local"]):
+            main()

@@ -1,5 +1,6 @@
 """Step contract used by pipeline execution."""
 
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -49,6 +50,8 @@ def step_contract(
     )
 
     def _decorate(handler: StepHandler) -> StepHandler:
+        if declared_inputs:
+            _validate_handler_signature(handler, declared_inputs)
         setattr(handler, "declared_inputs", list(declared_inputs))
         setattr(handler, "declared_outputs", list(declared_outputs))
         setattr(handler, "supports_batch", batch_capability)
@@ -258,6 +261,47 @@ def _collect_input_artifact_refs(value: Any, *, step_id: str, key: str) -> list[
         f"Step '{step_id}' input binding '{key}' has unsupported type "
         f"{type(value).__name__}; expected artifact refs, const literals, or primitive values."
     )
+
+
+def _validate_handler_signature(
+    handler: StepHandler, declared_inputs: list[str]
+) -> None:
+    """Check that declared inputs appear in the handler's function signature."""
+    try:
+        sig = inspect.signature(handler)
+    except (ValueError, TypeError):
+        return
+
+    params = sig.parameters
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if has_var_keyword:
+        return
+
+    param_names = {
+        name
+        for name, p in params.items()
+        if p.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    }
+    # Remove the first parameter (ctx) from the check
+    ordered = [
+        name
+        for name, p in params.items()
+        if p.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    ]
+    if ordered:
+        param_names.discard(ordered[0])
+
+    missing = sorted(name for name in declared_inputs if name not in param_names)
+    if missing:
+        raise StepBindingError(
+            f"@step_contract declares inputs {declared_inputs} but handler "
+            f"'{handler.__name__}' is missing parameters: {missing}. "
+            "Either add them to the function signature or use **kwargs."
+        )
 
 
 def _coerce_capability(value: Any, field_name: str) -> bool:

@@ -1,5 +1,6 @@
 """Base runner execution flow shared by runtime adapters."""
 
+import logging
 from abc import ABC
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -7,6 +8,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger("trakt.runner")
 
 from trakt.core.bindings import get_const_binding_value, is_const_binding
 from trakt.core.context import Context
@@ -64,6 +67,7 @@ class RunnerBase(ABC):
         ) as pipeline_span:
             ctx.add_metadata("pipeline_span", pipeline_span)
             ctx.emit_event("pipeline.started")
+            logger.info("Running pipeline '%s' (%s mode)...", pipeline.name, pipeline.execution_mode)
 
             try:
                 artifacts = self.load_inputs(pipeline, ctx, **kwargs)
@@ -81,6 +85,12 @@ class RunnerBase(ABC):
                     "status": "success",
                 }
                 _set_span_attribute(pipeline_span, "status", "success")
+                logger.info(
+                    "Pipeline '%s' completed in %.0fms (%d steps, status=success)",
+                    pipeline.name,
+                    round((perf_counter() - started) * 1000),
+                    len(step_reports),
+                )
             except Exception as exc:
                 error = {"type": type(exc).__name__, "message": str(exc)}
                 ctx.emit_event(
@@ -151,6 +161,7 @@ class RunnerBase(ABC):
             ctx.add_metadata("active_span", step_span)
             try:
                 ctx.emit_event("step.started", step_id=step.id, rows_in=rows_in)
+                logger.info("Running step '%s'...", step.id)
                 started = perf_counter()
                 raw_result = step.run(ctx, **step_kwargs)
                 duration_ms = round((perf_counter() - started) * 1000, 3)
@@ -172,6 +183,12 @@ class RunnerBase(ABC):
                     rows_in=rows_in,
                     rows_out=rows_out,
                     metrics=step_metrics,
+                )
+                rows_in_str = str(rows_in) if rows_in is not None else "?"
+                rows_out_str = str(rows_out) if rows_out is not None else "?"
+                logger.info(
+                    "Step '%s' completed (%.0fms, %s rows in -> %s rows out)",
+                    step.id, duration_ms, rows_in_str, rows_out_str,
                 )
             finally:
                 ctx.add_metadata("active_span", None)
